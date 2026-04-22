@@ -140,39 +140,44 @@ parsePrettyDiffs = reverse . doParse [] . lines
     {-@ parseDel :: (Nat, Nat) -> String -> rs:[String] -> {v:(Maybe (DiffOperation ValidLineRange), [String]) | len (snd v) <= len rs} @-}
     parseDel :: (LineNo, LineNo) -> String -> [String] -> (Maybe (DiffOperation LineRange), [String])
     parseDel r1 hrs2 rs = let
-        -- NOTE: the wildcard should correspond to the end of line,
-        -- but is ignored for simplicity.
         (r2,_) = parseRange hrs2
         (ls,rs2) = span (isPrefixOf "<") rs
-        in (Just $ Deletion (LineRange r1 (map (drop 2) ls)) (fst r2), rs2)
+        contents = map (drop 2) ls
+        in case contents of
+            (_:_) -> (Just $ Deletion (mkLineRange (fst r1) contents) (fst r2), rs2)
+            _ -> (Nothing, rs2)
 
     {-@ parseAdd :: (Nat, Nat) -> String -> rs:[String] -> {v:(Maybe (DiffOperation ValidLineRange), [String]) | len (snd v) <= len rs} @-}
     parseAdd :: (LineNo, LineNo) -> String -> [String] -> (Maybe (DiffOperation LineRange), [String])
     parseAdd r1 hrs2 rs = let
-        -- NOTE: the wildcard should correspond to the end of line,
-        -- but is ignored for simplicity.
         (r2,_) = parseRange hrs2
         (ls,rs2) = span (isPrefixOf ">") rs
-        in (Just $ Addition (LineRange r2 (map (drop 2) ls)) (fst r1), rs2)
+        contents = map (drop 2) ls
+        in case contents of
+            (_:_) -> (Just $ Addition (mkLineRange (fst r2) contents) (fst r1), rs2)
+            _ -> (Nothing, rs2)
 
     {-@ parseChange :: (Nat, Nat) -> String -> rs:[String] -> {v:(Maybe (DiffOperation ValidLineRange), [String]) | len (snd v) <= len rs} @-}
     parseChange :: (LineNo, LineNo) -> String -> [String] -> (Maybe (DiffOperation LineRange), [String])
     parseChange r1 hrs2 rs = let
-        -- NOTE: the wildcard should correspond to the end of line,
-        -- but is ignored for simplicity.
         (r2,_) = parseRange hrs2
         (ls1,rs2) = span (isPrefixOf "<") rs
         in case rs2 of
             -- The left and right diff of a 'Change' are separated by a "---" line.
             ("---":rs3) -> let
                 (ls2,rs4) = span (isPrefixOf ">") rs3
-                in (Just $ Change (LineRange r1 (map (drop 2) ls1)) (LineRange r2 (map (drop 2) ls2)), rs4)
+                contents1 = map (drop 2) ls1
+                contents2 = map (drop 2) ls2
+                in case (contents1, contents2) of
+                    (_:_, _:_) -> (Just $ Change (mkLineRange (fst r1) contents1) (mkLineRange (fst r2) contents2), rs4)
+                    _ -> (Nothing, rs4)
             _ -> (Nothing,rs2)
 
     {-@ parseRange :: String -> {v : ((Nat, Nat), String) | fst (fst v) <= snd (fst v)} @-}
     parseRange :: String -> ((LineNo, LineNo), String)
     parseRange l = let
         (fstLine,rs) = span isDigit l
+        a = max 0 (read fstLine)
         (sndLine,rs3) = case rs of
                                     -- The comma is used to separate
                                     -- the start and end line numbers in a range,
@@ -180,7 +185,8 @@ parsePrettyDiffs = reverse . doParse [] . lines
                                     -- i.e. the range is a single line.
                                     (',':rs2) -> span isDigit rs2
                                     _ -> (fstLine,rs)
-        in ((read fstLine,read sndLine),rs3)
+        b = max a (read sndLine)
+        in ((a, b), rs3)
 
 -- | Line number alias. Always non-negative.
 type LineNo = Int

@@ -106,12 +106,13 @@ prettyDiffs (d : rest) = prettyDiff d $$ prettyDiffs rest
           vcat (map (\l -> char start <+> text l) lins)
 
 -- | Parse pretty printed 'Diff's as 'DiffOperation's.
+{-@ parsePrettyDiffs :: String -> [DiffOperation ValidLineRange] @-}
 parsePrettyDiffs :: String -> [DiffOperation LineRange]
 parsePrettyDiffs = reverse . doParse [] . lines
   where
     -- | Parsing entry point that iteratively accumulates 'DiffOperation's
     -- until the input is exhausted.
-    {-@ doParse :: [DiffOperation LineRange] -> diffs : [String] -> [DiffOperation LineRange] / [len diffs] @-}
+    {-@ doParse :: [DiffOperation ValidLineRange] -> diffs : [String] -> [DiffOperation ValidLineRange] / [len diffs] @-}
     doParse :: [DiffOperation LineRange] -> [String] -> [DiffOperation LineRange]
     -- NOTE: Incorrectly formatted lines are ignored.
     doParse acc [] = acc
@@ -121,6 +122,7 @@ parsePrettyDiffs = reverse . doParse [] . lines
             Just nd -> doParse (nd:acc) r
             _          -> doParse acc r
 
+    {-@ parseDiff :: s:{[String] | len s > 0} -> {v:(Maybe (DiffOperation ValidLineRange), [String]) | len (snd v) < len s} @-}
     parseDiff :: [String] -> (Maybe (DiffOperation LineRange), [String])
     parseDiff [] = (Nothing,[])
     parseDiff (h:rs) = let
@@ -135,6 +137,7 @@ parsePrettyDiffs = reverse . doParse [] . lines
                 ('c':hrs2) -> parseChange r1 hrs2 rs
                 _ -> (Nothing,rs)
 
+    {-@ parseDel :: (Nat, Nat) -> String -> rs:[String] -> {v:(Maybe (DiffOperation ValidLineRange), [String]) | len (snd v) <= len rs} @-}
     parseDel :: (LineNo, LineNo) -> String -> [String] -> (Maybe (DiffOperation LineRange), [String])
     parseDel r1 hrs2 rs = let
         -- NOTE: the wildcard should correspond to the end of line,
@@ -143,6 +146,7 @@ parsePrettyDiffs = reverse . doParse [] . lines
         (ls,rs2) = span (isPrefixOf "<") rs
         in (Just $ Deletion (LineRange r1 (map (drop 2) ls)) (fst r2), rs2)
 
+    {-@ parseAdd :: (Nat, Nat) -> String -> rs:[String] -> {v:(Maybe (DiffOperation ValidLineRange), [String]) | len (snd v) <= len rs} @-}
     parseAdd :: (LineNo, LineNo) -> String -> [String] -> (Maybe (DiffOperation LineRange), [String])
     parseAdd r1 hrs2 rs = let
         -- NOTE: the wildcard should correspond to the end of line,
@@ -151,6 +155,7 @@ parsePrettyDiffs = reverse . doParse [] . lines
         (ls,rs2) = span (isPrefixOf ">") rs
         in (Just $ Addition (LineRange r2 (map (drop 2) ls)) (fst r1), rs2)
 
+    {-@ parseChange :: (Nat, Nat) -> String -> rs:[String] -> {v:(Maybe (DiffOperation ValidLineRange), [String]) | len (snd v) <= len rs} @-}
     parseChange :: (LineNo, LineNo) -> String -> [String] -> (Maybe (DiffOperation LineRange), [String])
     parseChange r1 hrs2 rs = let
         -- NOTE: the wildcard should correspond to the end of line,
@@ -164,7 +169,8 @@ parsePrettyDiffs = reverse . doParse [] . lines
                 in (Just $ Change (LineRange r1 (map (drop 2) ls1)) (LineRange r2 (map (drop 2) ls2)), rs4)
             _ -> (Nothing,rs2)
 
-    parseRange :: String -> ((LineNo, LineNo),String)
+    {-@ parseRange :: String -> {v : ((Nat, Nat), String) | fst (fst v) <= snd (fst v)} @-}
+    parseRange :: String -> ((LineNo, LineNo), String)
     parseRange l = let
         (fstLine,rs) = span isDigit l
         (sndLine,rs3) = case rs of

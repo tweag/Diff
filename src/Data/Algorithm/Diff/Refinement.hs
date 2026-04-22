@@ -8,6 +8,25 @@ import Data.Algorithm.Diff.Type
 
 -- * Diff predicates and refinement type aliases
 
+{-@ reflect validDiff @-}
+validDiff :: (a -> b -> Bool) -> PolyDiff a b -> Bool
+validDiff eq (Both x y) = eq x y
+validDiff _ (First _) = True
+validDiff _ (Second _) = True
+
+{-@ reflect allFirst @-}
+--{-@ allFirst :: diffs : [PolyDiff a b] -> {v : Bool | v => allElems (validDiff (==)) diffs } @-}
+allFirst :: [PolyDiff a b] -> Bool
+allFirst [] = True
+allFirst (First _ : xs) = allFirst xs
+allFirst _ = False
+
+{-@ reflect allSecond @-}
+allSecond :: [PolyDiff a b] -> Bool
+allSecond [] = True
+allSecond (Second _ : xs) = allSecond xs
+allSecond _ = False
+
 {-@
 inline validListDiff
 define length x = len x
@@ -68,6 +87,13 @@ noFFSS (First _ : xs) = not (headIsFirst xs) && noFFSS xs
 noFFSS (Second _ : xs) = not (headIsSecond xs) && noFFSS xs
 noFFSS (Both _ _ : xs) = noFFSS xs
 
+{-@ reflect coherentDiff @-}
+-- | Checks that both contents match whenever we have a 'Both' value.
+coherentDiff :: Eq a => Diff a -> Bool
+coherentDiff (Both x y) = x == y
+coherentDiff (First _) = True
+coherentDiff (Second _) = True
+
 -- 'Diff' type for the precondition of 'diffToLineRanges'.
 {-@ type LineDiff = Diff (NonEmpty String) @-}
 
@@ -91,3 +117,18 @@ snd3 :: (a, b, c) -> b
 snd3 (_, y, _) = y
 thd3 :: (a, b, c) -> c
 thd3 (_, _, z) = z
+
+{-@ assume coerceLH :: forall <p :: a -> Bool>. a -> a<p> @-}
+coerceLH :: a -> a
+coerceLH x = x
+
+{-@ reflect map' @-}
+map' :: (a -> b) -> [a] -> [b]
+map' _ [] = []
+map' f (x:xs) = f x : map' f xs
+
+{-@ reflect allElems @-}
+--{-@ allElems :: prop : (a -> Bool) -> xs : [a] -> {v : Bool | v && len xs > 0 => prop (head xs) && allElems prop (tail xs)} @-}
+allElems :: (a -> Bool) -> [a] -> Bool
+allElems _ [] = True
+allElems p (x:xs) = p x && allElems p xs

@@ -31,3 +31,11 @@ instance Bifunctor PolyDiff where
 
 -- | This is 'PolyDiff' specialized so both sides are the same type.
 type Diff a = PolyDiff a a
+
+isFirst, isSecond, isBoth :: PolyDiff a b -> Bool
+isFirst (First _) = True
+isFirst _ = False
+isSecond (Second _) = True
+isSecond _ = False
+isBoth (Both _ _) = True
+isBoth _ = False

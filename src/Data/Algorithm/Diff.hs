@@ -1,4 +1,5 @@
 {-@ LIQUID "--ple" @-}
+{-@ LIQUID "--reflection" @-}
 -- Import of the 'Data.Algorithm.Diff.Refinement' module is required for LiquidHaskell
 -- specifications in this module, but is unused in the actual code.
 -- The following GHC option suppresses the unused import warning.
@@ -77,7 +78,8 @@ import Prelude hiding (pi)
 import Data.Array (listArray, (!))
 import Data.Algorithm.Diff.Type
 import Data.Algorithm.Diff.Refinement (fst3, snd3, thd3, headIsFirst,
-                                        headIsSecond, headIsBoth, noStuttering)
+                                        headIsSecond, headIsBoth, noStuttering,
+                                        validDiff)
 import Data.Foldable (find)
 
 -- | /Diff Instruction/ — an internal enum recording the direction of a single
@@ -369,8 +371,13 @@ ses eq as bs = path $ searchEndpoint 0 [addsnake lena lenb cd (DL 0 0 [])]
 -- > [Both "a" "a",First "b",Both "c" "c",Both "d" "d",First "e",Second "f"]
 -- > > getDiff "abcde" "acdf"
 -- > [Both 'a' 'a',First 'b',Both 'c' 'c',Both 'd' 'd',First 'e',Second 'f']
+{-@ getDiff :: (Eq a) => [a] -> [a] -> [{v : Diff a | validDiff equal v}]@-}
 getDiff :: (Eq a) => [a] -> [a] -> [Diff a]
-getDiff = getDiffBy (==)
+getDiff = getDiffBy equal
+
+{-@ opaque-reflect equal @-}
+equal :: (Eq a) => a -> a -> Bool
+equal = (==)
 
 -- | Takes two lists and returns a list of differences between them, grouped
 -- into chunks. This is 'getGroupedDiffBy' with '==' used as predicate.
@@ -384,6 +391,7 @@ getGroupedDiff = getGroupedDiffBy (==)
 
 -- | A form of 'getDiff' with no 'Eq' constraint. Instead, an equality predicate
 -- is taken as the first argument.
+{-@ assume getDiffBy :: eq : (a -> b -> Bool) -> [a] -> [b] -> [{v : PolyDiff a b | validDiff eq v}] @-}
 getDiffBy :: (a -> b -> Bool) -> [a] -> [b] -> [PolyDiff a b]
 getDiffBy eq a b = markup a b . reverse $ ses eq a b
     where markup (x:xs) (y:ys) ds

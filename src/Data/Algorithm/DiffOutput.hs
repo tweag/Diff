@@ -10,7 +10,17 @@
 --
 -- Generates a string output that is similar to diff normal mode.
 -----------------------------------------------------------------------------
-module Data.Algorithm.DiffOutput where
+module Data.Algorithm.DiffOutput
+  ( DiffOperation (..)
+  , LineNo
+  , LineRange (..)
+  , diffToLineRanges
+  , ppDiff
+  , prettyDiffs
+  , parsePrettyDiffs
+  , mkLineRange
+  ) where
+
 import Data.Algorithm.Diff
 import Text.PrettyPrint hiding ((<>))
 import Data.Char

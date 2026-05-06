@@ -215,6 +215,14 @@ data DL = DL
 -- which we call a "D-path location node".
 {-@ type DLN D = { x : DL | len (path x) = D } @-}
 
+{-@ reflect boundedNodes @-}
+-- | Checks if the coordinates of all nodes within a list are bounded
+-- by the given number.
+{-@ boundedNodes :: Nat -> [DL] -> Bool @-}
+boundedNodes :: Int -> [DL] -> Bool
+boundedNodes n [] = True
+boundedNodes n (dl : dls) = (poi dl <= n && poj dl <= n) && boundedNodes n dls
+
 {-@ inline kdiag @-}
 -- | Computes the k-diagonal of a node.
 -- Used in LiquidHaskell logic as a predicate.
@@ -272,6 +280,11 @@ canDiag eq as bs lena lenb = \ i j ->
      arAs = listArray (0,lena - 1) as
      arBs = listArray (0,lenb - 1) bs
 
+-- This refinement type alias encodes the exit condition of 'canDiag' within
+-- the recursive definition of 'addsnake' necessary to prove the latter
+-- terminates without merging both functions.
+{-@ type BoundedPred B = i : Nat -> j : Nat -> {b : Bool | (i >= B || j >= B) => not b} @-}
+
 -- | Perform one breadth-first search expansion step, advancing every wave front
 -- 'DL' node by one 'DI' edit (one non-diagonal edge) and then following
 -- any available snake.
@@ -293,35 +306,42 @@ canDiag eq as bs lena lenb = \ i j ->
 -- Precondition: The node list must be non-empty.
 {-@
 dstep
-  :: (Nat -> Nat -> Bool)
+  :: boundary : Nat
+  -> BoundedPred boundary
   -> d : Nat
-  -> {nodes : WaveFront d (kdiag (head nodes)) | len nodes > 0}
+  -> {nodes : WaveFront d (kdiag (head nodes)) | len nodes > 0 && boundedNodes boundary nodes}
   -> {v : WaveFront (d + 1) (kdiag (head nodes) + 1) | len v = len nodes + 1}
 @-}
 dstep
-  :: (Int -> Int -> Bool) -- ^ Diagonal predicate
+  :: Int                  -- ^ Boundary value for 'addsnake' termination check
+  -> (Int -> Int -> Bool) -- ^ Diagonal predicate
   -> Int                  -- ^ The current D-length; used for the static check of wave front invariant.
   -> [DL]                 -- ^ A non-empty wave front of nodes at edit distance D
   -> [DL]                 -- ^ A non-empty wave front of nodes at edit distance D+1
-dstep _ d [] = error "dstep: Cannot perform expansion on an empty list of nodes"
-dstep cd d (dl:dls) = addsnake cd (hStep dl) : stepAndMerge dl dls
+dstep b _ d [] = error "dstep: Cannot perform expansion on an empty list of nodes"
+dstep b cd d (dl:dls) = addsnake b cd (hStep dl) : stepAndMerge dl dls
   where
-    {-@ hStep :: x : DLN d -> {v : DLN (d + 1) | kdiag v = kdiag x + 1} @-}
+    {-@ hStep
+          :: x : DLN d
+          -> {v : DLN (d + 1) | poi v = poi x + 1 && poj v = poj x} @-}
     hStep node = node {poi = poi node + 1, path = F : path node}
-    {-@ vStep :: x : DLN d -> {v : DLN (d + 1) | kdiag v = kdiag x - 1} @-}
+    {-@ vStep
+          :: x : DLN d
+          -> {v : DLN (d + 1) | poi v = poi x && poj v = poj x + 1} @-}
     vStep node = node {poj = poj node + 1, path = S : path node}
     -- Merge vertical step of previous node with horizontal step of next node,
     -- selecting the furthest-reaching candidate for each shared k-diagonal,
     -- and extend it along matching elements.
-    {-@ stepAndMerge :: prev : DLN d
-                     -> rest : WaveFront d (kdiag prev - 2)
-                     -> {v : WaveFront (d + 1) (kdiag prev - 1) | len v = len rest + 1} / [len rest] @-}
+    {-@ stepAndMerge
+          :: {prev : DLN d | poi prev <= b && poj prev <= b}
+          -> {rest : WaveFront d (kdiag prev - 2) | boundedNodes b rest}
+          -> {v : WaveFront (d + 1) (kdiag prev - 1) | len v = len rest + 1}
+          / [len rest] @-}
     stepAndMerge :: DL -> [DL] -> [DL]
-    stepAndMerge prev [] = [addsnake cd $ vStep prev]
+    stepAndMerge prev [] = [addsnake b cd $ vStep prev]
     stepAndMerge prev (next:rest) =
-      addsnake cd (furthestReaching (vStep prev) (hStep next)) : stepAndMerge next rest
+      addsnake b cd (furthestReaching (vStep prev) (hStep next)) : stepAndMerge next rest
 
-{-@ lazy addsnake @-}
 -- | Follow a /snake/ from the current position of a 'DL' node.
 --
 -- A snake is a sequence of diagonal (cost-free) edges in the edit graph,
@@ -330,10 +350,19 @@ dstep cd d (dl:dls) = addsnake cd (hStep dl) : stepAndMerge dl dls
 -- @(poi dl, poj dl)@, this function advances both 'poi' and 'poj' as long
 -- as consecutive elements match, leaving 'path' unchanged (diagonal moves
 -- are not recorded as edit steps).
-{-@ addsnake :: (Nat -> Nat -> Bool) -> x : DL -> {v : DL | path v == path x && kdiag v = kdiag x} @-}
-addsnake :: (Int -> Int -> Bool) -> DL -> DL
-addsnake cd dl
-    | cd pi pj = addsnake cd $
+{-@
+addsnake :: boundary : Nat
+         -> BoundedPred boundary
+         -> {dl : DL | poi dl <= boundary + 1 && poj dl <= boundary + 1}
+         -> {v : DL | path v == path dl && kdiag v = kdiag dl}
+         / [(boundary + 1 - poi dl) + (boundary + 1 - poj dl)]
+@-}
+addsnake :: Int                  -- ^ Boundary value for termination check
+         -> (Int -> Int -> Bool) -- ^ Equality predicate, a.k.a. 'canDiag'
+         -> DL
+         -> DL
+addsnake boundary cd dl
+    | cd pi pj = addsnake boundary cd $
                  dl {poi = pi + 1, poj = pj + 1, path = path dl}
     | otherwise   = dl
     where pi = poi dl; pj = poj dl
@@ -345,7 +374,7 @@ addsnake cd dl
 -- @ses eq as bs@ runs the Myers O(ND) diff algorithm following
 -- a five-step pipeline:
 --
--- 1. __Seed__: create an initial 0-path wave front @[addsnake cd (DL 0 0 [])]@
+-- 1. __Seed__: create an initial 0-path wave front @[addsnake boundary cd (DL 0 0 [])]@
 --    having a single node on the tip of the longest origin-sourced snake.
 -- 2. __Iterate__: apply 'dstep' repeatedly via 'iterate', producing an
 --    infinite list of wave fronts (one per edit distance D = 0, 1, 2, …).
@@ -375,11 +404,12 @@ addsnake cd dl
 -- comparisons across all snake extensions is therefore \( O(ND) \).
 ses :: (a -> b -> Bool) -> [a] -> [b] -> [DI]
 ses eq as bs = path . head . dropWhile (\dl -> poi dl /= lena || poj dl /= lenb) .
-            concat . iterate (uncurry (dstep cd) . withD) . (:[]) . addsnake cd $
+            concat . iterate (uncurry (dstep boundary cd) . withD) . (:[]) . addsnake boundary cd $
             DL {poi=0,poj=0,path=[]}
             where cd = canDiag eq as bs lena lenb
                   lena = length as; lenb = length bs
                   withD xs = (length . path . head $ xs, xs)
+                  boundary = max lena lenb
 
 -- | Takes two lists and returns a list of differences between them. This is
 -- 'getDiffBy' with '==' used as predicate.

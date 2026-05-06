@@ -264,14 +264,20 @@ furthestReaching x y
 --
 -- The first two 'Int' parameters stand for the lengths of the input lists,
 -- which are captured from the outer scope to compute them only once.
-canDiag :: (a -> b -> Bool) -> [a] -> [b] -> Int -> Int -> Int -> Int -> Bool
-canDiag eq as bs lena lenb = \ i j ->
-   if i < lena && j < lenb then (arAs ! i) `eq` (arBs ! j) else False
-   where
-     -- Lists are converted into arrays to have O(1) lookups.
-     arAs = listArray (0,lena - 1) as
-     arBs = listArray (0,lenb - 1) bs
+canDiag :: (a -> b -> Bool) -- ^ Custom equality predicate
+        -> [a] -- ^ First input
+        -> [b] -- ^ Second input
+        -> Int -- ^ First input's length
+        -> Int -- ^ Second input's lenth
+        -> (Int -> Int -> Bool) -- ^ Diagonal predicate on the edit grid
+canDiag eq as bs lena lenb = \i j ->
+  (i < lena && j < lenb) && ((arAs ! i) `eq` (arBs ! j))
+  where
+    -- Lists are converted into arrays to have O(1) lookups.
+    arAs = listArray (0,lena - 1) as
+    arBs = listArray (0,lenb - 1) bs
 
+{-@ assume error :: _ -> {_:_ | true} @-}
 
 -- | Perform one breadth-first search expansion step, advancing every wave front
 -- 'DL' node by one 'DI' edit (one non-diagonal edge) and then following
@@ -297,17 +303,19 @@ dstep
   :: fuel : Nat
   -> (Nat -> Nat -> Bool)
   -> d : Nat
-  -> {nodes : WaveFront d (kdiag (head nodes)) | len nodes > 0}
-  -> {v : WaveFront (d + 1) (kdiag (head nodes) + 1) | len v = len nodes + 1}
+  -> k : Int
+  -> {nodes : WaveFront d k | len nodes > 0}
+  -> {v : WaveFront (d + 1) (k + 1) | len v = len nodes + 1}
 @-}
 dstep
   :: Int                  -- ^ Fuel for 'addsnake' snake extension
   -> (Int -> Int -> Bool) -- ^ Diagonal predicate
   -> Int                  -- ^ The current D-length; used for the static check of wave front invariant.
+  -> Int                  -- ^ The k-diagonal of the head of the wave front (phantom for LH)
   -> [DL]                 -- ^ A non-empty wave front of nodes at edit distance D
   -> [DL]                 -- ^ A non-empty wave front of nodes at edit distance D+1
-dstep _ _ d [] = error "dstep: Cannot perform expansion on an empty list of nodes"
-dstep fuel cd _ (dl:dls) = addsnake fuel cd (hStep dl) : stepAndMerge dl dls
+dstep _ _ d _ [] = error "dstep: Cannot perform expansion on an empty list of nodes"
+dstep fuel cd _ _ (dl:dls) = addsnake fuel cd (hStep dl) : stepAndMerge dl dls
   where
     {-@ hStep
           :: x : DLN d
@@ -355,32 +363,30 @@ addsnake fuel cd dl
     | otherwise   = dl
     where pi = poi dl; pj = poj dl
 
-{-@ ignore ses @-}
 -- | Compute shortest edit script (SES), as the minimum sequence of 'DI' edit
 -- steps that transforms @as@ into @bs@, returned in reverse order.
 --
--- @ses eq as bs@ runs the Myers O(ND) diff algorithm following
--- a five-step pipeline:
+-- @ses eq as bs@ runs the Myers O(ND) diff algorithm:
 --
 -- 1. __Seed__: create an initial 0-path wave front @[addsnake boundary cd (DL 0 0 [])]@
 --    having a single node on the tip of the longest origin-sourced snake.
--- 2. __Iterate__: apply 'dstep' repeatedly via 'iterate', producing an
---    infinite list of wave fronts (one per edit distance D = 0, 1, 2, …).
--- 3. __Flatten__: 'concat' all wave fronts into a single stream of 'DL' nodes.
--- 4. __Find__: 'dropWhile' skips nodes until one reaches @(lena, lenb)@ — the
---    bottom-right corner of the edit graph — which is the terminal node of a
---    shortest edit script.
--- 5. __Extract__: 'head' returns that node; its 'path' field carries the edit
+-- 2. __Search__: for each wave front at edit distance \( D = 0, 1, \ldots \),
+--    check whether any node has reached the goal @(lena, lenb)@. If not,
+--    apply 'dstep' to advance to edit distance \( D+1 \).
+-- 3. __Extract__: the first goal node's 'path' field carries the edit
 --    trace in reverse order.
 --
--- This implementation is purely functional: rather than updating a shared
+-- The search loop uses a fuel counter bounded by @lena + lenb + 1@,
+-- which is the maximum number of edit distances that need to be explored
+-- (the worst case is deleting all of @as@ and inserting all of @bs@).
+--
+-- This implementation deviates from the paper in the folowing way: rather than updating a shared
 -- diagonal frontier array in place, as in the original paper, it builds a new
--- list of 'DL' nodes for each value of \( D \) and concatenates them into
--- a single lazy stream. This is simpler but carries a larger per-node overhead:
--- each 'DL' holds its own edit trace as a @['DI']@ list that structurally
--- shares its tail with the parent node's trace (consing one step reuses the
--- existing spine), rather than the paper's single-integer-per-diagonal
--- representation. The asymptotic time
+-- list of 'DL' nodes for each value of \( D \). This is simpler but carries a
+-- larger per-node overhead: each 'DL' holds its own edit trace as a @['DI']@
+-- list that structurally shares its tail with the parent node's trace (consing
+-- one step reuses the existing spine), rather than the paper's
+-- single-integer-per-diagonal representation. The asymptotic time
 -- and space complexity — \( O(ND) \) and \( O(D^2) \) respectively — is
 -- unchanged. Unlike the paper, which selects the better candidate per
 -- diagonal before extending its snake, 'dstep' extends snakes on /both/
@@ -391,13 +397,25 @@ addsnake fuel cd dl
 -- beyond the previous winner's endpoint. The total number of element
 -- comparisons across all snake extensions is therefore \( O(ND) \).
 ses :: (a -> b -> Bool) -> [a] -> [b] -> [DI]
-ses eq as bs = path . head . dropWhile (\dl -> poi dl /= lena || poj dl /= lenb) .
-            concat . iterate (uncurry (dstep boundary cd) . withD) . (:[]) . addsnake boundary cd $
-            DL {poi=0,poj=0,path=[]}
+ses eq as bs = search (worstCaseEdits + 1) 0 0 [addsnake worstCaseEdits cd (DL 0 0 [])]
             where cd = canDiag eq as bs lena lenb
                   lena = length as; lenb = length bs
-                  withD xs = (length . path . head $ xs, xs)
-                  boundary = max lena lenb
+                  worstCaseEdits = lena + lenb
+                  {-@ search :: fuel : Nat
+                             -> d : Nat
+                             -> k : Int
+                             -> {dls : WaveFront d k | len dls > 0}
+                             -> [DI] / [fuel] @-}
+                  search :: Int -> Int -> Int -> [DL] -> [DI]
+                  search 0 _ _ _ = error "search: unreachable because the trivial edit script is at iteration with fuel = 1"
+                  search fuel _ _ [] = error "ses: The search must have a seed node"
+                  search fuel currentD k wf = case findGoal wf of
+                      Just p  -> p
+                      Nothing -> search (fuel - 1) (currentD + 1) (k + 1) (dstep worstCaseEdits cd currentD k wf)
+                  findGoal [] = Nothing
+                  findGoal (dl:dls)
+                      | poi dl == lena && poj dl == lenb = Just (path dl)
+                      | otherwise = findGoal dls
 
 -- | Takes two lists and returns a list of differences between them. This is
 -- 'getDiffBy' with '==' used as predicate.

@@ -77,6 +77,7 @@ module Data.Algorithm.Diff
 import Prelude hiding (pi)
 import Data.Array (listArray, (!))
 import Data.Bifunctor
+import Data.Foldable (find)
 import Internal.LiftedFunctions
 
 -- | /Diff Instruction/ — an internal enum recording the direction of a single
@@ -265,14 +266,18 @@ furthestReaching x y
 --
 -- The first two 'Int' parameters stand for the lengths of the input lists,
 -- which are captured from the outer scope to compute them only once.
-canDiag :: (a -> b -> Bool) -> [a] -> [b] -> Int -> Int -> Int -> Int -> Bool
-canDiag eq as bs lena lenb = \ i j ->
-   if i < lena && j < lenb then (arAs ! i) `eq` (arBs ! j) else False
-   where
-     -- Lists are converted into arrays to have O(1) lookups.
-     arAs = listArray (0,lena - 1) as
-     arBs = listArray (0,lenb - 1) bs
-
+canDiag :: (a -> b -> Bool) -- ^ Custom equality predicate
+        -> [a] -- ^ First input
+        -> [b] -- ^ Second input
+        -> Int -- ^ First input's length
+        -> Int -- ^ Second input's lenth
+        -> (Int -> Int -> Bool) -- ^ Diagonal predicate on the edit grid
+canDiag eq as bs lena lenb = \i j ->
+  (i < lena && j < lenb) && ((arAs ! i) `eq` (arBs ! j))
+  where
+    -- Lists are converted into arrays to have O(1) lookups.
+    arAs = listArray (0,lena - 1) as
+    arBs = listArray (0,lenb - 1) bs
 
 -- | Perform one breadth-first search expansion step, advancing every wave front
 -- 'DL' node by one 'DI' edit (one non-diagonal edge) and then following
@@ -363,42 +368,50 @@ addsnake fuel cd dl
     | otherwise   = dl
     where pi = poi dl; pj = poj dl
 
-{-@ ignore ses @-}
 -- | Compute shortest edit script (SES), as the minimum sequence of 'DI' edit
 -- steps that transforms @as@ into @bs@, returned in reverse order.
 --
--- @ses eq as bs@ runs the Myers O(ND) diff algorithm following
--- a five-step pipeline:
+-- @ses eq as bs@ runs the Myers O(ND) diff algorithm:
 --
 -- 1. __Seed__: create an initial 0-path wave front @[addsnake boundary cd (DL 0 0 [])]@
 --    having a single node on the tip of the longest origin-sourced snake.
--- 2. __Iterate__: apply 'dstep' repeatedly via 'iterate', producing an
---    infinite list of wave fronts (one per edit distance D = 0, 1, 2, …).
--- 3. __Flatten__: 'concat' all wave fronts into a single stream of 'DL' nodes.
--- 4. __Find__: 'dropWhile' skips nodes until one reaches @(lena, lenb)@ — the
---    bottom-right corner of the edit graph — which is the terminal node of a
---    shortest edit script.
--- 5. __Extract__: 'head' returns that node; its 'path' field carries the edit
+-- 2. __Search__: for each wave front at edit distance \( D = 0, 1, \ldots \),
+--    check whether any node has reached the goal @(lena, lenb)@. If not,
+--    apply 'dstep' to advance to edit distance \( D+1 \).
+-- 3. __Extract__: the first goal node's 'path' field carries the edit
 --    trace in reverse order.
 --
--- This implementation is purely functional: rather than updating a shared
+-- The search loop uses a fuel counter bounded by @lena + lenb + 1@,
+-- which is the maximum number of edit distances that need to be explored
+-- (the worst case is deleting all of @as@ and inserting all of @bs@).
+--
+-- This implementation deviates from the paper in the folowing way: rather than updating a shared
 -- diagonal frontier array in place, as in the original paper, it builds a new
--- list of 'DL' nodes for each value of \( D \) and concatenates them into
--- a single lazy stream. This is simpler but carries a larger per-node overhead:
--- each 'DL' holds its own edit trace as a @['DI']@ list that structurally
--- shares its tail with the parent node's trace (consing one step reuses the
--- existing spine), rather than the paper's single-integer-per-diagonal
--- representation. The asymptotic time
+-- list of 'DL' nodes for each value of \( D \). This is simpler but carries a
+-- larger per-node overhead: each 'DL' holds its own edit trace as a @['DI']@
+-- list that structurally shares its tail with the parent node's trace (consing
+-- one step reuses the existing spine), rather than the paper's
+-- single-integer-per-diagonal representation. The asymptotic time
 -- and space complexity — \( O(ND) \) and \( O(D^2) \) respectively — is
 -- unchanged.
 ses :: (a -> b -> Bool) -> [a] -> [b] -> [DI]
-ses eq as bs = path . head . dropWhile (\dl -> poi dl /= lena || poj dl /= lenb) .
-            concat . iterate (uncurry (dstep boundary cd) . withD) . (:[]) . addsnake boundary cd $
-            DL {poi=0,poj=0,path=[]}
+ses eq as bs = search (worstCaseEdits + 1) 0 [addsnake worstCaseEdits cd (DL 0 0 [])]
             where cd = canDiag eq as bs lena lenb
                   lena = length as; lenb = length bs
-                  withD xs = (length . path . head $ xs, xs)
-                  boundary = max lena lenb
+                  worstCaseEdits = lena + lenb
+                  {-@ search :: fuel : Nat
+                             -> d : Nat
+                             -> {dls : WaveFront d | len dls > 0}
+                             -> [DI] / [fuel] @-}
+                  search :: Int -> Int -> [DL] -> [DI]
+                  search fuel _ [] = error "ses: The search must have a seed node"
+                  -- TODO: proving this case unreachable involves
+                  -- working out an endpoint notion in the LH logic.
+                  search 0 _ _ = []
+                  search fuel currentD wf = case findGoal wf of
+                      Just p  -> p
+                      Nothing -> search (fuel - 1) (currentD + 1) (dstep worstCaseEdits cd currentD wf)
+                  findGoal dls = path <$> find (\dl -> poi dl == lena && poj dl == lenb) dls
 
 -- | Takes two lists and returns a list of differences between them. This is
 -- 'getDiffBy' with '==' used as predicate.

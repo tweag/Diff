@@ -348,13 +348,26 @@ endPoint lena lenb dl = poi dl == lena && poj dl == lenb
 --
 -- The first two 'Int' parameters stand for the lengths of the input lists,
 -- which are captured from the outer scope to compute them only once.
-canDiag :: (a -> b -> Bool) -> [a] -> [b] -> Int -> Int -> Int -> Int -> Bool
-canDiag eq as bs lena lenb = \ i j ->
-   if i < lena && j < lenb then (arAs ! i) `eq` (arBs ! j) else False
-   where
-     -- Lists are converted into arrays to have O(1) lookups.
-     arAs = listArray (0,lena - 1) as
-     arBs = listArray (0,lenb - 1) bs
+{-@
+canDiag :: (a -> b -> Bool)
+        -> [a]
+        -> [b]
+        -> lena : Int
+        -> lenb : Int
+        -> DiagPred lena lenb
+@-}
+canDiag :: (a -> b -> Bool) -- ^ Custom equality predicate
+        -> [a] -- ^ First input
+        -> [b] -- ^ Second input
+        -> Int -- ^ First input's length
+        -> Int -- ^ Second input's lenth
+        -> (Int -> Int -> Bool) -- ^ Diagonal predicate on the edit grid
+canDiag eq as bs lena lenb = \i j ->
+  (i < lena && j < lenb) && ((arAs ! i) `eq` (arBs ! j))
+  where
+    -- Lists are converted into arrays to have O(1) lookups.
+    arAs = listArray (0,lena - 1) as
+    arBs = listArray (0,lenb - 1) bs
 
 -- | Perform one breadth-first search expansion step, advancing every wave front
 -- 'DL' node by one 'DI' edit (one non-diagonal edge) and then following
@@ -487,7 +500,6 @@ addsnake lena lenb cd dl
     | otherwise   = dl
     where pi = poi dl; pj = poj dl
 
-{-@ ignore ses @-}
 -- | Compute shortest edit script (SES), as the minimum sequence of 'DI' edit
 -- steps that transforms @as@ into @bs@, returned in reverse order.
 --
@@ -516,6 +528,11 @@ ses eq as bs = path $ searchEndpoint 0 [addsnake lena lenb cd (DL 0 0 [])]
   where
     cd = canDiag eq as bs lena lenb
     lena = length as; lenb = length bs
+    {-@ searchEndpoint
+          :: d : Nat
+          -> {dls : WaveFront lena lenb d | len dls > 0}
+          -> {v : DL | endPoint lena lenb v}
+          / [_wfDistanceToGoal lena lenb dls] @-}
     searchEndpoint :: Int -> [DL] -> DL
     searchEndpoint _ [] = error "ses: The search must have a seed node"
     searchEndpoint d wf = case findEndpoint lena lenb wf of
@@ -526,6 +543,11 @@ ses eq as bs = path $ searchEndpoint 0 [addsnake lena lenb cd (DL 0 0 [])]
     -- The abstract refinement @q@ lets 'find' carry the wave
     -- front element refinement (notably @len (path dl) == d@)
     -- over to the returned endpoint.
+    {-@ assume findEndpoint
+          :: forall <q :: DL -> Bool>.
+             i : Nat -> j : Nat -> xs : [DL<q>]
+          -> { m : Maybe {dl : DL<q> | endPoint i j dl}
+             | m == Nothing => _wfDistanceToGoal i j xs > 0} @-}
     findEndpoint :: Int -> Int -> [DL] -> Maybe DL
     findEndpoint i j = find (endPoint i j)
 

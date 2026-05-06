@@ -273,6 +273,7 @@ canDiag eq as bs lena lenb = \ i j ->
      arAs = listArray (0,lena - 1) as
      arBs = listArray (0,lenb - 1) bs
 
+
 -- | Perform one breadth-first search expansion step, advancing every wave front
 -- 'DL' node by one 'DI' edit (one non-diagonal edge) and then following
 -- any available snake.
@@ -297,40 +298,45 @@ canDiag eq as bs lena lenb = \ i j ->
 -- with one more node than the input.
 {-@
 dstep
-  :: (Nat -> Nat -> Bool)
+  :: fuel : Nat
+  -> (Nat -> Nat -> Bool)
   -> d : Nat
   -> {nodes : WaveFront d | len nodes > 0}
   -> {v : WaveFront (d + 1) | len v = len nodes + 1}
 @-}
 dstep
-  :: (Int -> Int -> Bool) -- ^ Diagonal predicate
+  :: Int                  -- ^ Fuel for 'addsnake' snake extension
+  -> (Int -> Int -> Bool) -- ^ Diagonal predicate
   -> Int                  -- ^ The current D-length; used for the static check of wave front invariant.
   -> [DL]                 -- ^ A non-empty wave front of nodes at edit distance D
   -> [DL]                 -- ^ A non-empty wave front of nodes at edit distance D+1
 -- NOTE: @_d@ is a phantom (apparently unused) parameter required by local LiquidHaskell specifications.
 -- This parameter sits at the first equation as a workaround
--- to GHC removing it when desugaring multi-equation definitions.
+-- to GHC removing it when desugaring multi-equation definitions.  
 -- See https://github.com/ucsd-progsys/liquidhaskell/issues/2704
-dstep _ _d [] = error "dstep: Cannot perform expansion on an empty list of nodes"
-dstep cd _ (dl:dls) = addsnake cd (hStep dl) : stepAndMerge dl dls
+dstep _ _ _d [] = error "dstep: Cannot perform expansion on an empty list of nodes"
+dstep fuel cd _ (dl:dls) = addsnake fuel cd (hStep dl) : stepAndMerge dl dls
   where
-    {-@ hStep :: x : DLN _d -> {v : DLN (_d + 1) | _kdiag v = _kdiag x + 1} @-}
+    {-@ hStep
+          :: x : DLN _d
+          -> {v : DLN (_d + 1) | poi v = poi x + 1 && poj v = poj x} @-}
     hStep node = node {poi = poi node + 1, path = F : path node}
-    {-@ vStep :: x : DLN _d -> {v : DLN (_d + 1) | _kdiag v = _kdiag x - 1} @-}
+    {-@ vStep
+          :: x : DLN _d
+          -> {v : DLN (_d + 1) | poi v = poi x && poj v = poj x + 1} @-}
     vStep node = node {poj = poj node + 1, path = S : path node}
     -- Merge vertical step of previous node with horizontal step of next node,
     -- selecting the furthest-reaching candidate for each shared k-diagonal,
     -- and extend it along matching elements.
-     {-@ stepAndMerge :: prev : DLN _d
-                     -> {rest : [DLN _d] | _wfDiags (_kdiag prev - 2) rest}
-                     -> {v : [DLN (_d+1)] | _wfDiags (_kdiag prev - 1) v && len v = len rest + 1}
-                     / [len rest] @-}
-    stepAndMerge :: DL -> [DL] -> [DL]
-    stepAndMerge prev [] = [addsnake cd $ vStep prev]
+    {-@ stepAndMerge
+          :: prev : DLN _d
+          -> {rest : [DLN _d] | _wfDiags (_kdiag prev - 2) rest}
+          -> {v : [DLN (_d+1)] | _wfDiags (_kdiag prev - 1) v && len v = len rest + 1}
+          / [len rest] @-}
+    stepAndMerge prev [] = [addsnake fuel cd $ vStep prev]
     stepAndMerge prev (next:rest) =
-      addsnake cd (furthestReaching (vStep prev) (hStep next)) : stepAndMerge next rest
+      addsnake fuel cd (furthestReaching (vStep prev) (hStep next)) : stepAndMerge next rest
 
-{-@ lazy addsnake @-}
 -- | Follow a /snake/ from the current position of a 'DL' node.
 --
 -- A snake is a sequence of diagonal (cost-free) edges in the edit graph,
@@ -339,10 +345,20 @@ dstep cd _ (dl:dls) = addsnake cd (hStep dl) : stepAndMerge dl dls
 -- @(poi dl, poj dl)@, this function advances both 'poi' and 'poj' as long
 -- as consecutive elements match, leaving 'path' unchanged (diagonal moves
 -- are not recorded as edit steps).
-{-@ addsnake :: (Nat -> Nat -> Bool) -> x : DL -> {v : DL | path v == path x && _kdiag v = _kdiag x} @-}
-addsnake :: (Int -> Int -> Bool) -> DL -> DL
-addsnake cd dl
-    | cd pi pj = addsnake cd $
+{-@
+addsnake :: fuel : Nat
+         -> (Nat -> Nat -> Bool)
+         -> dl : DL
+         -> {v : DL | path v == path dl && _kdiag v = _kdiag dl}
+         / [fuel]
+@-}
+addsnake :: Int                  -- ^ Fuel for termination
+         -> (Int -> Int -> Bool) -- ^ Equality predicate, a.k.a. 'canDiag'
+         -> DL
+         -> DL
+addsnake 0 _ dl = dl
+addsnake fuel cd dl
+    | cd pi pj = addsnake (fuel - 1) cd $
                  dl {poi = pi + 1, poj = pj + 1, path = path dl}
     | otherwise   = dl
     where pi = poi dl; pj = poj dl
@@ -354,7 +370,7 @@ addsnake cd dl
 -- @ses eq as bs@ runs the Myers O(ND) diff algorithm following
 -- a five-step pipeline:
 --
--- 1. __Seed__: create an initial 0-path wave front @[addsnake cd (DL 0 0 [])]@
+-- 1. __Seed__: create an initial 0-path wave front @[addsnake boundary cd (DL 0 0 [])]@
 --    having a single node on the tip of the longest origin-sourced snake.
 -- 2. __Iterate__: apply 'dstep' repeatedly via 'iterate', producing an
 --    infinite list of wave fronts (one per edit distance D = 0, 1, 2, …).
@@ -377,11 +393,12 @@ addsnake cd dl
 -- unchanged.
 ses :: (a -> b -> Bool) -> [a] -> [b] -> [DI]
 ses eq as bs = path . head . dropWhile (\dl -> poi dl /= lena || poj dl /= lenb) .
-            concat . iterate (uncurry (dstep cd) . withD) . (:[]) . addsnake cd $
+            concat . iterate (uncurry (dstep boundary cd) . withD) . (:[]) . addsnake boundary cd $
             DL {poi=0,poj=0,path=[]}
             where cd = canDiag eq as bs lena lenb
                   lena = length as; lenb = length bs
                   withD xs = (length . path . head $ xs, xs)
+                  boundary = max lena lenb
 
 -- | Takes two lists and returns a list of differences between them. This is
 -- 'getDiffBy' with '==' used as predicate.

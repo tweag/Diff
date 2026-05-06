@@ -215,14 +215,6 @@ data DL = DL
 -- which we call a "D-path location node".
 {-@ type DLN D = { x : DL | len (path x) = D } @-}
 
-{-@ reflect boundedNodes @-}
--- | Checks if the coordinates of all nodes within a list are bounded
--- by the given number.
-{-@ boundedNodes :: Nat -> [DL] -> Bool @-}
-boundedNodes :: Int -> [DL] -> Bool
-boundedNodes n [] = True
-boundedNodes n (dl : dls) = (poi dl <= n && poj dl <= n) && boundedNodes n dls
-
 {-@ inline kdiag @-}
 -- | Computes the k-diagonal of a node.
 -- Used in LiquidHaskell logic as a predicate.
@@ -280,10 +272,6 @@ canDiag eq as bs lena lenb = \ i j ->
      arAs = listArray (0,lena - 1) as
      arBs = listArray (0,lenb - 1) bs
 
--- This refinement type alias encodes the exit condition of 'canDiag' within
--- the recursive definition of 'addsnake' necessary to prove the latter
--- terminates without merging both functions.
-{-@ type BoundedPred B = i : Nat -> j : Nat -> {b : Bool | (i >= B || j >= B) => not b} @-}
 
 -- | Perform one breadth-first search expansion step, advancing every wave front
 -- 'DL' node by one 'DI' edit (one non-diagonal edge) and then following
@@ -306,20 +294,20 @@ canDiag eq as bs lena lenb = \ i j ->
 -- Precondition: The node list must be non-empty.
 {-@
 dstep
-  :: boundary : Nat
-  -> BoundedPred boundary
+  :: fuel : Nat
+  -> (Nat -> Nat -> Bool)
   -> d : Nat
-  -> {nodes : WaveFront d (kdiag (head nodes)) | len nodes > 0 && boundedNodes boundary nodes}
+  -> {nodes : WaveFront d (kdiag (head nodes)) | len nodes > 0}
   -> {v : WaveFront (d + 1) (kdiag (head nodes) + 1) | len v = len nodes + 1}
 @-}
 dstep
-  :: Int                  -- ^ Boundary value for 'addsnake' termination check
+  :: Int                  -- ^ Fuel for 'addsnake' snake extension
   -> (Int -> Int -> Bool) -- ^ Diagonal predicate
   -> Int                  -- ^ The current D-length; used for the static check of wave front invariant.
   -> [DL]                 -- ^ A non-empty wave front of nodes at edit distance D
   -> [DL]                 -- ^ A non-empty wave front of nodes at edit distance D+1
-dstep b _ d [] = error "dstep: Cannot perform expansion on an empty list of nodes"
-dstep b cd d (dl:dls) = addsnake b cd (hStep dl) : stepAndMerge dl dls
+dstep _ _ d [] = error "dstep: Cannot perform expansion on an empty list of nodes"
+dstep fuel cd _ (dl:dls) = addsnake fuel cd (hStep dl) : stepAndMerge dl dls
   where
     {-@ hStep
           :: x : DLN d
@@ -333,14 +321,13 @@ dstep b cd d (dl:dls) = addsnake b cd (hStep dl) : stepAndMerge dl dls
     -- selecting the furthest-reaching candidate for each shared k-diagonal,
     -- and extend it along matching elements.
     {-@ stepAndMerge
-          :: {prev : DLN d | poi prev <= b && poj prev <= b}
-          -> {rest : WaveFront d (kdiag prev - 2) | boundedNodes b rest}
+          :: prev : DLN d
+          -> rest : WaveFront d (kdiag prev - 2)
           -> {v : WaveFront (d + 1) (kdiag prev - 1) | len v = len rest + 1}
           / [len rest] @-}
-    stepAndMerge :: DL -> [DL] -> [DL]
-    stepAndMerge prev [] = [addsnake b cd $ vStep prev]
+    stepAndMerge prev [] = [addsnake fuel cd $ vStep prev]
     stepAndMerge prev (next:rest) =
-      addsnake b cd (furthestReaching (vStep prev) (hStep next)) : stepAndMerge next rest
+      addsnake fuel cd (furthestReaching (vStep prev) (hStep next)) : stepAndMerge next rest
 
 -- | Follow a /snake/ from the current position of a 'DL' node.
 --
@@ -351,18 +338,19 @@ dstep b cd d (dl:dls) = addsnake b cd (hStep dl) : stepAndMerge dl dls
 -- as consecutive elements match, leaving 'path' unchanged (diagonal moves
 -- are not recorded as edit steps).
 {-@
-addsnake :: boundary : Nat
-         -> BoundedPred boundary
-         -> {dl : DL | poi dl <= boundary + 1 && poj dl <= boundary + 1}
+addsnake :: fuel : Nat
+         -> (Nat -> Nat -> Bool)
+         -> dl : DL
          -> {v : DL | path v == path dl && kdiag v = kdiag dl}
-         / [(boundary + 1 - poi dl) + (boundary + 1 - poj dl)]
+         / [fuel]
 @-}
-addsnake :: Int                  -- ^ Boundary value for termination check
+addsnake :: Int                  -- ^ Fuel for termination
          -> (Int -> Int -> Bool) -- ^ Equality predicate, a.k.a. 'canDiag'
          -> DL
          -> DL
-addsnake boundary cd dl
-    | cd pi pj = addsnake boundary cd $
+addsnake 0 _ dl = dl
+addsnake fuel cd dl
+    | cd pi pj = addsnake (fuel - 1) cd $
                  dl {poi = pi + 1, poj = pj + 1, path = path dl}
     | otherwise   = dl
     where pi = poi dl; pj = poj dl

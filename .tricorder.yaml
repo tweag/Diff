@@ -1,0 +1,5 @@
+session:
+  command: "cabal repl Diff-liquidhaskell --repl-options='-fno-break-on-exception -fno-break-on-error -v1 -ferror-spans -j'"
+  targets: "Diff-liquidhaskell"
+  test_targets: []
+  watch_dirs: src

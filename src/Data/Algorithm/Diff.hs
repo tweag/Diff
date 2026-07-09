@@ -269,7 +269,7 @@ addsnake cd dl
 -- and space complexity — \( O(ND) \) and \( O(D^2) \) respectively — is
 -- unchanged. Unlike the paper, which selects the better candidate per
 -- diagonal before extending its snake, 'dstep' extends snakes on /both/
--- candidates before 'selectBestDLFromPairs' selects the winner, discarding the other
+-- candidates before 'furthestReaching' selects the winner, discarding the other
 -- extension. This does not affect the time bound: on any given diagonal,
 -- all snake intervals — retained and discarded — are non-overlapping across
 -- successive values of \( D \), because each new candidate starts at or

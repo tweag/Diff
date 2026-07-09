@@ -214,7 +214,10 @@ dstep
   -> [DL]                 -- ^ A non-empty wave front of nodes at edit distance D+1
 dstep _ _ _ [] = error "dstep: Cannot perform expansion on an empty list of nodes"
 dstep ib jb cd (dl:dls) =
-    filter withinBounds $ addsnake cd (hStep dl) : stepAndMerge dl dls
+    if poi dl >= ib then
+      stepAndMerge dl dls
+    else
+      addsnake cd (hStep dl) : stepAndMerge dl dls
   where
     hStep node = node {poi = poi node + 1, path = F : path node}
     vStep node = node {poj = poj node + 1, path = S : path node}
@@ -222,11 +225,18 @@ dstep ib jb cd (dl:dls) =
     -- selecting the furthest-reaching candidate for each shared k-diagonal,
     -- and extend it along matching elements.
     stepAndMerge :: DL -> [DL] -> [DL]
-    stepAndMerge prev [] = [addsnake cd $ vStep prev]
+    stepAndMerge prev [] =
+      if poj prev >= jb then
+        []
+      else
+        [addsnake cd $ vStep prev]
     stepAndMerge prev (next:rest) =
+      if poj prev >= jb then
+        []
+      else if poi next >= ib then
+        stepAndMerge next rest
+      else
         addsnake cd (furthestReaching (vStep prev) (hStep next)) : stepAndMerge next rest
-
-    withinBounds node = poi node <= ib && poj node <= jb
 
 {-@ lazy addsnake @-}
 -- | Follow a /snake/ from the current position of a 'DL' node.

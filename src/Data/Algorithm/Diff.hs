@@ -207,11 +207,14 @@ dstep
   -> {v : [DL] | len v = len nodes + 1}
 @-}
 dstep
-  :: (Int -> Int -> Bool) -- ^ Diagonal predicate
+  :: Int
+  -> Int
+  -> (Int -> Int -> Bool) -- ^ Diagonal predicate
   -> [DL]                 -- ^ A non-empty wave front of nodes at edit distance D
   -> [DL]                 -- ^ A non-empty wave front of nodes at edit distance D+1
-dstep _ [] = error "dstep: Cannot perform expansion on an empty list of nodes"
-dstep cd (dl:dls) = addsnake cd (hStep dl) : stepAndMerge dl dls
+dstep _ _ _ [] = error "dstep: Cannot perform expansion on an empty list of nodes"
+dstep ib jb cd (dl:dls) =
+    filter withinBounds $ addsnake cd (hStep dl) : stepAndMerge dl dls
   where
     hStep node = node {poi = poi node + 1, path = F : path node}
     vStep node = node {poj = poj node + 1, path = S : path node}
@@ -221,7 +224,9 @@ dstep cd (dl:dls) = addsnake cd (hStep dl) : stepAndMerge dl dls
     stepAndMerge :: DL -> [DL] -> [DL]
     stepAndMerge prev [] = [addsnake cd $ vStep prev]
     stepAndMerge prev (next:rest) =
-      addsnake cd (furthestReaching (vStep prev) (hStep next)) : stepAndMerge next rest
+        addsnake cd (furthestReaching (vStep prev) (hStep next)) : stepAndMerge next rest
+
+    withinBounds node = poi node <= ib && poj node <= jb
 
 {-@ lazy addsnake @-}
 -- | Follow a /snake/ from the current position of a 'DL' node.
@@ -277,7 +282,7 @@ addsnake cd dl
 -- comparisons across all snake extensions is therefore \( O(ND) \).
 ses :: (a -> b -> Bool) -> [a] -> [b] -> [DI]
 ses eq as bs = path . head . dropWhile (\dl -> poi dl /= lena || poj dl /= lenb) .
-            concat . iterate (dstep cd) . (:[]) . addsnake cd $
+            concat . iterate (dstep lena lenb cd) . (:[]) . addsnake cd $
             DL {poi=0,poj=0,path=[]}
             where cd = canDiag eq as bs lena lenb
                   lena = length as; lenb = length bs
@@ -303,8 +308,6 @@ getGroupedDiff = getGroupedDiffBy (==)
 -- | A form of 'getDiff' with no 'Eq' constraint. Instead, an equality predicate
 -- is taken as the first argument.
 getDiffBy :: (a -> b -> Bool) -> [a] -> [b] -> [PolyDiff a b]
-getDiffBy _ a [] = map First a
-getDiffBy _ [] b = map Second b
 getDiffBy eq a b = markup a b . reverse $ ses eq a b
     where markup (x:xs) (y:ys) ds
             | eq x y = Both x y : markup xs ys ds

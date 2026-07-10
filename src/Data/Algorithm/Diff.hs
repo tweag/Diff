@@ -214,8 +214,9 @@ dstep
   -> [DL]                 -- ^ A non-empty wave front of nodes at edit distance D+1
 dstep _ _ _ [] = error "dstep: Cannot perform expansion on an empty list of nodes"
 dstep ib jb cd (dl:dls) =
-    if poi dl >= ib then
-      stepAndMerge dl dls
+    if poi dl == ib then
+      let (dl', dls') = dropWhileWithLast ((ib <=) . poi) dl dls
+       in stepAndMerge dl' dls'
     else
       addsnake cd (hStep dl) : stepAndMerge dl dls
   where
@@ -233,10 +234,13 @@ dstep ib jb cd (dl:dls) =
     stepAndMerge prev (next:rest) =
       if poj prev >= jb then
         []
-      else if poi next >= ib then
-        stepAndMerge next rest
       else
         addsnake cd (furthestReaching (vStep prev) (hStep next)) : stepAndMerge next rest
+
+    dropWhileWithLast _ x [] = (x, [])
+    dropWhileWithLast p x (y:xs)
+      | p y = dropWhileWithLast p y xs
+      | otherwise = (x, y:xs)
 
 {-@ lazy addsnake @-}
 -- | Follow a /snake/ from the current position of a 'DL' node.

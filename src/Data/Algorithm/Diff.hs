@@ -1,4 +1,6 @@
 {-@ LIQUID "--ple" @-}
+{-@ LIQUID "--etabeta" @-}
+{-@ LIQUID "--higherorder" @-}
 -----------------------------------------------------------------------------
 -- |
 -- Module      :  Data.Algorithm.Diff
@@ -212,9 +214,9 @@ data DL = DL
                      --   'S' steps are stored.
     } deriving (Show, Eq)
 
--- This refinement type alias represents a 'DL' value with a fixed /D-length/,
--- which we call a "D-path location node".
-{-@ type DLN D = { x : DL | len (path x) = D } @-}
+-- A "D-path location node" is a 'DL' value within the edit grid bounds
+-- having a fixed /D-length/.
+{-@ type DLN M N D = { x : DL | len (path x) = D && withinBounds M N x} @-}
 
 {-@ inline _kdiag @-}
 -- | Computes the k-diagonal of a node.
@@ -233,8 +235,9 @@ _wfDiags k (dl:dls) = poi dl - poj dl == k && _wfDiags (k - 2) dls
 
 -- A wave front is a list of 'DL' nodes, all at the same edit distance @D@,
 -- with k-diagonals @D@, @D−2@, …, @-D+2@, @-D@.
-{-@ type WaveFront D = {xs : [DLN D] | _wfDiags D xs} @-}
+{-@ type WaveFront M N D = {xs : [DLN M N D] | _wfDiags D xs} @-}
 
+{-@ inline furthestReaching @-}
 -- | Select the furthest-reaching candidate of two 'DL' nodes competing for the
 -- same k-diagonal, as required by the Myers algorithm.
 --
@@ -257,6 +260,36 @@ furthestReaching x y
   | poi x >= poi y = x
   | otherwise      = y
 
+-- * Proving the algorithm termination in LiquidHaskell
+--
+-- The original algorithm is known to terminate because a wave front /eventually/ reaches the 'endPoint'.
+-- To prove this, both inputs lengths are threaded within phantom parameters throughout.
+-- In essence, both lengths are used to encode the edit grid and its end point.
+
+{-@ inline manhattanDistance @-}
+{-@ manhattanDistance :: lena : Nat -> lenb : Nat -> {i : Nat | lena >= i} -> { j : Nat | lenb >= j} -> Nat @-}
+manhattanDistance :: Int -> Int -> Int -> Int -> Int
+manhattanDistance lena lenb i j  = lena - i + lenb - j
+
+{-@ reflect _minDistanceToGoal @-}
+{-@ _minDistanceToGoal :: lena : Nat -> lenb : Nat
+                       -> nodes:[{dl:DL | withinBounds lena lenb dl}] -> Nat / [len nodes] @-}
+_minDistanceToGoal :: Int -> Int -> [DL] -> Int
+_minDistanceToGoal lena lenb [] = 0
+_minDistanceToGoal lena lenb (dl:dls) = min (manhattanDistance lena lenb (poi dl) (poj dl) ) (_minDistanceToGoal lena lenb dls)
+
+{-@ inline withinBounds @-}
+{-@ withinBounds :: lena : Nat -> lenb : Nat -> dl : DL -> {v:Bool | v <=> (poi dl <= lena && poj dl <= lenb) } @-}
+withinBounds :: Int -> Int -> DL -> Bool
+withinBounds lena lenb dl = poi dl <= lena && poj dl <= lenb
+
+{-@ inline endPoint @-}
+endPoint :: Int -> Int -> DL -> Bool
+endPoint lena lenb dl = poi dl == lena && poj dl == lenb
+
+{-@ type DiagPred M N = i : Nat -> j : Nat -> {b : Bool | ((i >= M || j >= N) => not b)
+                                                       && (b => (i < M || j < N)) } @-}
+
 -- | Build a /diagonal predicate/ — a closure that tests whether position
 -- @(i, j)@ in the edit graph has a diagonal edge (a /match point/ in Myers'
 -- terminology).
@@ -266,6 +299,14 @@ furthestReaching x y
 --
 -- The first two 'Int' parameters stand for the lengths of the input lists,
 -- which are captured from the outer scope to compute them only once.
+{-@
+canDiag :: (a -> b -> Bool) 
+        -> [a]
+        -> [b]
+        -> lena : Int
+        -> lenb : Int
+        -> DiagPred lena lenb
+@-}
 canDiag :: (a -> b -> Bool) -- ^ Custom equality predicate
         -> [a] -- ^ First input
         -> [b] -- ^ Second input
@@ -303,45 +344,50 @@ canDiag eq as bs lena lenb = \i j ->
 -- with one more node than the input.
 {-@
 dstep
-  :: fuel : Nat
-  -> (Nat -> Nat -> Bool)
+  :: ib : Nat
+  -> jb : Nat
+  -> DiagPred ib jb
   -> d : Nat
-  -> {nodes : WaveFront d | len nodes > 0}
-  -> {v : WaveFront (d + 1) | len v = len nodes + 1}
+  -> {nodes : WaveFront ib jb d | len nodes > 0 && _minDistanceToGoal ib jb nodes > 0}
+  -> {v : WaveFront ib jb (d + 1) | len v > 0
+                                 && _minDistanceToGoal ib jb v < _minDistanceToGoal ib jb nodes}
 @-}
 dstep
-  :: Int                  -- ^ Fuel for 'addsnake' snake extension
+  :: Int                  -- ^ First input's length.
+  -> Int                  -- ^ Second input's length.
   -> (Int -> Int -> Bool) -- ^ Diagonal predicate
   -> Int                  -- ^ The current D-length; used for the static check of wave front invariant.
   -> [DL]                 -- ^ A non-empty wave front of nodes at edit distance D
   -> [DL]                 -- ^ A non-empty wave front of nodes at edit distance D+1
 -- NOTE: @_d@ is a phantom (apparently unused) parameter required by local LiquidHaskell specifications.
 -- This parameter sits at the first equation as a workaround
--- to GHC removing it when desugaring multi-equation definitions.  
+-- to GHC removing it when desugaring multi-equation definitions.
 -- See https://github.com/ucsd-progsys/liquidhaskell/issues/2704
-dstep _ _ _d [] = error "dstep: Cannot perform expansion on an empty list of nodes"
-dstep fuel cd _ (dl:dls) = addsnake fuel cd (hStep dl) : stepAndMerge dl dls
+dstep lena lenb _ _d [] = error "dstep: Cannot perform expansion on an empty list of nodes"
+dstep lena lenb cd _ (dl:dls) =
+  filter (withinBounds lena lenb) $ addsnake lena lenb cd (hStep dl) : stepAndMerge dl dls
   where
     {-@ hStep
-          :: x : DLN _d
-          -> {v : DLN (_d + 1) | poi v = poi x + 1 && poj v = poj x} @-}
+          :: x : DLN lena lenb _d
+          -> {v : DL | len (path v) = _d && poi v = poi x + 1 && poj v = poj x} @-}
     hStep node = node {poi = poi node + 1, path = F : path node}
     {-@ vStep
-          :: x : DLN _d
-          -> {v : DLN (_d + 1) | poi v = poi x && poj v = poj x + 1} @-}
+          :: x : DLN lena lenb _d
+          -> {v : DL | len (path v) = _d && poi v = poi x && poj v = poj x + 1} @-}
     vStep node = node {poj = poj node + 1, path = S : path node}
     -- Merge vertical step of previous node with horizontal step of next node,
     -- selecting the furthest-reaching candidate for each shared k-diagonal,
     -- and extend it along matching elements.
     {-@ stepAndMerge
-          :: prev : DLN _d
-          -> {rest : [DLN _d] | _wfDiags (_kdiag prev - 2) rest}
-          -> {v : [DLN (_d+1)] | _wfDiags (_kdiag prev - 1) v && len v = len rest + 1}
+          :: prev : DLN lena lenb _d
+          -> {rest : [DLN lena lenb _d] | _wfDiags (_kdiag prev - 2) rest}
+          -> {v : [{ dl : DL | len (path dl) = _d + 1}] | _wfDiags (_kdiag prev - 1) v && len v = len rest + 1}
           / [len rest] @-}
-    stepAndMerge prev [] = [addsnake fuel cd $ vStep prev]
+    stepAndMerge prev [] = [addsnake lena lenb cd $ vStep prev]
     stepAndMerge prev (next:rest) =
-      addsnake fuel cd (furthestReaching (vStep prev) (hStep next)) : stepAndMerge next rest
+      addsnake lena lenb cd (furthestReaching (vStep prev) (hStep next)) : stepAndMerge next rest
 
+{-@ lazy addsnake@-}
 -- | Follow a /snake/ from the current position of a 'DL' node.
 --
 -- A snake is a sequence of diagonal (cost-free) edges in the edit graph,
@@ -351,23 +397,27 @@ dstep fuel cd _ (dl:dls) = addsnake fuel cd (hStep dl) : stepAndMerge dl dls
 -- as consecutive elements match, leaving 'path' unchanged (diagonal moves
 -- are not recorded as edit steps).
 {-@
-addsnake :: fuel : Nat
-         -> (Nat -> Nat -> Bool)
-         -> dl : DL
-         -> {v : DL | path v == path dl && _kdiag v = _kdiag dl}
-         / [fuel]
+addsnake :: lena : Nat
+         -> lenb : Nat
+         -> DiagPred lena lenb
+         -> {dl : DL | withinBounds lena lenb dl}
+         -> {v : DL | path v == path dl
+                   && _kdiag v = _kdiag dl
+                   && withinBounds lena lenb dl}
+         / [manhattanDistance lena lenb (poi dl) (poj dl)]
 @-}
-addsnake :: Int                  -- ^ Fuel for termination
+addsnake :: Int                  -- ^ First input's length phantom parameter for invariant checking.
+         -> Int                  -- ^ Second input's length phantom parameter for invariant checking.
          -> (Int -> Int -> Bool) -- ^ Equality predicate, a.k.a. 'canDiag'
          -> DL
          -> DL
-addsnake 0 _ dl = dl
-addsnake fuel cd dl
-    | cd pi pj = addsnake (fuel - 1) cd $
+addsnake ib jb cd dl
+    | cd pi pj = addsnake ib jb cd $
                  dl {poi = pi + 1, poj = pj + 1, path = path dl}
     | otherwise   = dl
     where pi = poi dl; pj = poj dl
 
+{-@ ignore ses @-}
 -- | Compute shortest edit script (SES), as the minimum sequence of 'DI' edit
 -- steps that transforms @as@ into @bs@, returned in reverse order.
 --
@@ -395,23 +445,23 @@ addsnake fuel cd dl
 -- and space complexity — \( O(ND) \) and \( O(D^2) \) respectively — is
 -- unchanged.
 ses :: (a -> b -> Bool) -> [a] -> [b] -> [DI]
-ses eq as bs = search (worstCaseEdits + 1) 0 [addsnake worstCaseEdits cd (DL 0 0 [])]
+ses eq as bs = search 0 [addsnake lena lenb cd (DL 0 0 [])]
             where cd = canDiag eq as bs lena lenb
                   lena = length as; lenb = length bs
-                  worstCaseEdits = lena + lenb
-                  {-@ search :: fuel : Nat
-                             -> d : Nat
-                             -> {dls : WaveFront d | len dls > 0}
-                             -> [DI] / [fuel] @-}
-                  search :: Int -> Int -> [DL] -> [DI]
-                  search fuel _ [] = error "ses: The search must have a seed node"
-                  -- TODO: proving this case unreachable involves
-                  -- working out an endpoint notion in the LH logic.
-                  search 0 _ _ = []
-                  search fuel currentD wf = case findGoal wf of
-                      Just p  -> p
-                      Nothing -> search (fuel - 1) (currentD + 1) (dstep worstCaseEdits cd currentD wf)
-                  findGoal dls = path <$> find (\dl -> poi dl == lena && poj dl == lenb) dls
+                  {-@ search :: d : Nat
+                             -> {dls : WaveFront lena lenb d | len dls > 0}
+                             -> {v : [DI] | len v = d}
+                             / [_minDistanceToGoal lena lenb dls] @-}
+                  search :: Int -> [DL] -> [DI]
+                  search _ [] = error "ses: The search must have a seed node"
+                  search d wf = case findEndpoint lena lenb wf of
+                      Just p  -> path p
+                      Nothing -> search (d + 1) (dstep lena lenb cd d wf)
+                  {-@ assume findEndpoint :: i : Nat -> j : Nat -> xs : [DL]
+                                          -> { m : Maybe {dl : DL | endPoint i j dl}
+                                             | m == Nothing => _minDistanceToGoal i j xs > 0} @-}
+                  findEndpoint :: Int -> Int -> [DL] -> Maybe DL
+                  findEndpoint i j = find (endPoint i j)
 
 -- | Takes two lists and returns a list of differences between them. This is
 -- 'getDiffBy' with '==' used as predicate.

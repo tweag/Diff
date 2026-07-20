@@ -235,7 +235,7 @@ _wfDiags k (dl:dls) = poi dl - poj dl == k && _wfDiags (k - 2) dls
 
 -- A wave front is a list of 'DL' nodes, all at the same edit distance @D@,
 -- with k-diagonals @D@, @D−2@, …, @-D+2@, @-D@.
-{-@ type WaveFront M N D = {xs : [DLN M N D] | _wfDiags D xs} @-}
+{-@ type WaveFront M N D = {xs : [DLN M N D] | len xs > 0 && _wfDiags (_kdiag (head xs)) xs} @-}
 
 {-@ inline furthestReaching @-}
 -- | Select the furthest-reaching candidate of two 'DL' nodes competing for the
@@ -348,9 +348,8 @@ dstep
   -> jb : Nat
   -> DiagPred ib jb
   -> d : Nat
-  -> {nodes : WaveFront ib jb d | len nodes > 0 && _minDistanceToGoal ib jb nodes > 0}
-  -> {v : WaveFront ib jb (d + 1) | len v > 0
-                                 && _minDistanceToGoal ib jb v < _minDistanceToGoal ib jb nodes}
+  -> {nodes : WaveFront ib jb d | _minDistanceToGoal ib jb nodes > 0}
+  -> {v : WaveFront ib jb (d + 1) | _minDistanceToGoal ib jb v < _minDistanceToGoal ib jb nodes}
 @-}
 dstep
   :: Int                  -- ^ First input's length.
@@ -381,9 +380,9 @@ dstep lena lenb cd _ (dl:dls) =
     -- selecting the furthest-reaching candidate for each shared k-diagonal,
     -- and extend it along matching elements.
     {-@ stepAndMerge
-          :: prev : DLN lena lenb _d
-          -> {rest : [DLN lena lenb _d] | _wfDiags (_kdiag prev - 2) rest}
-          -> {v : [DLN lena lenb (_d + 1)] | _wfDiags (_kdiag prev - 1) v}
+          :: DLN lena lenb _d
+          -> rest : WaveFront lena lenb _d
+          -> WaveFront lena lenb (_d + 1)
           / [len rest] @-}
     stepAndMerge prev dls =
       -- The vertical coordinate of a node being out-of-bounds
@@ -413,7 +412,9 @@ addsnake :: lena : Nat
          -> {dl : DL | withinBounds lena lenb dl}
          -> {v : DL | path v == path dl
                    && _kdiag v = _kdiag dl
-                   && withinBounds lena lenb v}
+                   && withinBounds lena lenb v
+                   && poi v >= poi dl
+                   && poj v >= poj dl}
          / [manhattanDistance lena lenb (poi dl) (poj dl)]
 @-}
 addsnake :: Int                  -- ^ First input's length phantom parameter for invariant checking.
@@ -459,7 +460,7 @@ ses eq as bs = search 0 [addsnake lena lenb cd (DL 0 0 [])]
             where cd = canDiag eq as bs lena lenb
                   lena = length as; lenb = length bs
                   {-@ search :: d : Nat
-                             -> {dls : WaveFront lena lenb d | len dls > 0}
+                             -> dls : WaveFront lena lenb d
                              -> {v : [DI] | len v = d}
                              / [_minDistanceToGoal lena lenb dls] @-}
                   search :: Int -> [DL] -> [DI]

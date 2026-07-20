@@ -365,15 +365,17 @@ dstep
 -- See https://github.com/ucsd-progsys/liquidhaskell/issues/2704
 dstep lena lenb _ _d [] = error "dstep: Cannot perform expansion on an empty list of nodes"
 dstep lena lenb cd _ (dl:dls) =
-  filter (withinBounds lena lenb) $ addsnake lena lenb cd (hStep dl) : stepAndMerge dl dls
+  if poi dl >= lena then stepAndMerge dl dls
+  else
+    addsnake lena lenb cd (hStep dl) : stepAndMerge dl dls
   where
     {-@ hStep
           :: x : DLN lena lenb _d
-          -> {v : DL | len (path v) = _d && poi v = poi x + 1 && poj v = poj x} @-}
+          -> {v : DL | len (path v) = _d + 1 && poi v = poi x + 1 && poj v = poj x} @-}
     hStep node = node {poi = poi node + 1, path = F : path node}
     {-@ vStep
           :: x : DLN lena lenb _d
-          -> {v : DL | len (path v) = _d && poi v = poi x && poj v = poj x + 1} @-}
+          -> {v : DL | len (path v) = _d + 1 && poi v = poi x && poj v = poj x + 1} @-}
     vStep node = node {poj = poj node + 1, path = S : path node}
     -- Merge vertical step of previous node with horizontal step of next node,
     -- selecting the furthest-reaching candidate for each shared k-diagonal,
@@ -381,11 +383,19 @@ dstep lena lenb cd _ (dl:dls) =
     {-@ stepAndMerge
           :: prev : DLN lena lenb _d
           -> {rest : [DLN lena lenb _d] | _wfDiags (_kdiag prev - 2) rest}
-          -> {v : [{ dl : DL | len (path dl) = _d + 1}] | _wfDiags (_kdiag prev - 1) v && len v = len rest + 1}
+          -> {v : [DLN lena lenb (_d + 1)] | _wfDiags (_kdiag prev - 1) v}
           / [len rest] @-}
-    stepAndMerge prev [] = [addsnake lena lenb cd $ vStep prev]
-    stepAndMerge prev (next:rest) =
-      addsnake lena lenb cd (furthestReaching (vStep prev) (hStep next)) : stepAndMerge next rest
+    stepAndMerge prev dls =
+      -- The vertical coordinate of a node being out-of-bounds
+      -- implies upcoming nodes are as well because they lie on
+      -- lower diagonals than the former node.
+      if poj prev >= lenb then []
+      else case dls of
+        [] -> [addsnake lena lenb cd $ vStep prev]
+        (next:rest) ->
+          if poi next >= lena then stepAndMerge next rest
+          else addsnake lena lenb cd (furthestReaching (vStep prev) (hStep next))
+                 : stepAndMerge next rest
 
 {-@ lazy addsnake@-}
 -- | Follow a /snake/ from the current position of a 'DL' node.
@@ -403,7 +413,7 @@ addsnake :: lena : Nat
          -> {dl : DL | withinBounds lena lenb dl}
          -> {v : DL | path v == path dl
                    && _kdiag v = _kdiag dl
-                   && withinBounds lena lenb dl}
+                   && withinBounds lena lenb v}
          / [manhattanDistance lena lenb (poi dl) (poj dl)]
 @-}
 addsnake :: Int                  -- ^ First input's length phantom parameter for invariant checking.

@@ -278,6 +278,12 @@ _minDistanceToGoal :: Int -> Int -> [DL] -> Int
 _minDistanceToGoal lena lenb [] = 0
 _minDistanceToGoal lena lenb (dl:dls) = min (manhattanDistance lena lenb (poi dl) (poj dl) ) (_minDistanceToGoal lena lenb dls)
 
+{-@ ignore _reducesDistanceToGoal @-}
+-- Use to prove termination of ses
+{-@ _reducesDistanceToGoal :: lena : Nat -> lenb : Nat -> wf1:[{dl:DL | withinBounds lena lenb dl}] -> wf1:[{dl:DL | withinBounds lena lenb dl}] -> Bool @-}
+_reducesDistanceToGoal :: Int -> Int -> [DL] -> [DL] -> Bool
+_reducesDistanceToGoal lena lenb wf1 wf2 = _minDistanceToGoal lena lenb wf2 < _minDistanceToGoal lena lenb wf1
+
 {-@ inline withinBounds @-}
 {-@ withinBounds :: lena : Nat -> lenb : Nat -> dl : DL -> {v:Bool | v <=> (poi dl <= lena && poj dl <= lenb) } @-}
 withinBounds :: Int -> Int -> DL -> Bool
@@ -347,8 +353,8 @@ dstep
   -> jb : Nat
   -> DiagPred ib jb
   -> d : Nat
-  -> {nodes : WaveFront ib jb d | len nodes > 0 && _minDistanceToGoal ib jb nodes > 0}
-  -> {v : WaveFront ib jb (d + 1) | len v > 0 && _minDistanceToGoal ib jb v < _minDistanceToGoal ib jb nodes}
+  -> {nodes : WaveFront ib jb d | len nodes > 0}
+  -> {v : WaveFront ib jb (d + 1) | len v > 0}
 @-}
 dstep
   :: Int                  -- ^ First input's length.
@@ -380,8 +386,8 @@ dstep lena lenb cd _ (dl:dls) =
     -- and extend it along matching elements.
     {-@ stepAndMerge
           :: prev: DLN lena lenb _d
-          -> rest : {xs : [DLN lena lenb _d] | _wfDiags (_kdiag prev - 2) rest && _minDistanceToGoal lena lenb rest > 0}
-          -> {v : [DLN lena lenb (_d + 1)] | _wfDiags (_kdiag prev - 1) v && _minDistanceToGoal lena lenb v < _minDistanceToGoal lena lenb rest }
+          -> rest : {xs : [DLN lena lenb _d] | _wfDiags (_kdiag prev - 2) rest}
+          -> {v : [DLN lena lenb (_d + 1)] | _wfDiags (_kdiag prev - 1) v}
           / [len rest] @-}
     stepAndMerge prev dls =
       -- The vertical coordinate of a node being out-of-bounds

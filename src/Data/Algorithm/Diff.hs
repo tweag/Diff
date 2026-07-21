@@ -287,8 +287,7 @@ withinBounds lena lenb dl = poi dl <= lena && poj dl <= lenb
 endPoint :: Int -> Int -> DL -> Bool
 endPoint lena lenb dl = poi dl == lena && poj dl == lenb
 
-{-@ type DiagPred M N = i : Nat -> j : Nat -> {b : Bool | ((i >= M || j >= N) => not b)
-                                                       && (b => (i < M || j < N)) } @-}
+{-@ type DiagPred M N = i : Nat -> j : Nat -> {b : Bool | ((i >= M || j >= N) => not b)} @-}
 
 -- | Build a /diagonal predicate/ — a closure that tests whether position
 -- @(i, j)@ in the edit graph has a diagonal edge (a /match point/ in Myers'
@@ -380,9 +379,9 @@ dstep lena lenb cd _ (dl:dls) =
     -- selecting the furthest-reaching candidate for each shared k-diagonal,
     -- and extend it along matching elements.
     {-@ stepAndMerge
-          :: DLN lena lenb _d
-          -> rest : WaveFront lena lenb _d
-          -> WaveFront lena lenb (_d + 1)
+          :: prev: DLN lena lenb _d
+          -> rest : {xs : [DLN lena lenb _d] | _wfDiags (_kdiag prev - 2) rest && _minDistanceToGoal lena lenb rest > 0}
+          -> {v : [DLN lena lenb (_d + 1)] | _wfDiags (_kdiag prev - 1) v && _minDistanceToGoal lena lenb v < _minDistanceToGoal lena lenb rest }
           / [len rest] @-}
     stepAndMerge prev dls =
       -- The vertical coordinate of a node being out-of-bounds

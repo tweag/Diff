@@ -235,7 +235,7 @@ _wfDiags k (dl:dls) = poi dl - poj dl == k && _wfDiags (k - 2) dls
 
 -- A wave front is a list of 'DL' nodes, all at the same edit distance @D@,
 -- with k-diagonals @D@, @D−2@, …, @-D+2@, @-D@.
-{-@ type WaveFront M N D = {xs : [DLN M N D] | len xs > 0 && _wfDiags (_kdiag (head xs)) xs} @-}
+{-@ type WaveFront M N D = {xs : [DLN M N D] | _wfDiags (_kdiag (head xs)) xs} @-}
 
 {-@ inline furthestReaching @-}
 -- | Select the furthest-reaching candidate of two 'DL' nodes competing for the
@@ -348,8 +348,8 @@ dstep
   -> jb : Nat
   -> DiagPred ib jb
   -> d : Nat
-  -> {nodes : WaveFront ib jb d | _minDistanceToGoal ib jb nodes > 0}
-  -> {v : WaveFront ib jb (d + 1) | _minDistanceToGoal ib jb v < _minDistanceToGoal ib jb nodes}
+  -> {nodes : WaveFront ib jb d | len nodes > 0 && _minDistanceToGoal ib jb nodes > 0}
+  -> {v : WaveFront ib jb (d + 1) | len v > 0 && _minDistanceToGoal ib jb v < _minDistanceToGoal ib jb nodes}
 @-}
 dstep
   :: Int                  -- ^ First input's length.

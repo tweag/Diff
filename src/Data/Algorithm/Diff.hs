@@ -387,8 +387,10 @@ dstep lena lenb cd _ (dl:dls) =
     {-@ stepAndMerge
           :: prev: DLN lena lenb _d
           -> rest : {xs : [DLN lena lenb _d] | _wfDiags (_kdiag prev - 2) rest}
-          -> {v : [DLN lena lenb (_d + 1)] | _wfDiags (_kdiag prev - 1) v}
-          / [len rest] @-}
+          -> {v : [DLN lena lenb (_d + 1)] | _wfDiags (_kdiag (head v)) v
+                                          && (poj prev < lenb => len v > 0)
+                                          && (poi prev < lena && poj prev < lenb =>
+                                               _kdiag (head v) == _kdiag prev - 1)} / [len rest] @-}
     stepAndMerge prev dls =
       -- The vertical coordinate of a node being out-of-bounds
       -- implies upcoming nodes are as well because they lie on
@@ -397,9 +399,9 @@ dstep lena lenb cd _ (dl:dls) =
       else case dls of
         [] -> [addsnake lena lenb cd $ vStep prev]
         (next:rest) ->
-          if poi next >= lena then stepAndMerge next rest
-          else addsnake lena lenb cd (furthestReaching (vStep prev) (hStep next))
-                 : stepAndMerge next rest
+            if poi next >= lena then stepAndMerge next rest
+            else
+              addsnake lena lenb cd (furthestReaching (vStep prev) (hStep next)) : stepAndMerge next rest
 
 {-@ lazy addsnake@-}
 -- | Follow a /snake/ from the current position of a 'DL' node.

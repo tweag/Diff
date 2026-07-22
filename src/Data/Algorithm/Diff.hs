@@ -305,7 +305,7 @@ endPoint lena lenb dl = poi dl == lena && poj dl == lenb
 -- The first two 'Int' parameters stand for the lengths of the input lists,
 -- which are captured from the outer scope to compute them only once.
 {-@
-canDiag :: (a -> b -> Bool) 
+canDiag :: (a -> b -> Bool)
         -> [a]
         -> [b]
         -> lena : Int
@@ -392,9 +392,10 @@ dstep lena lenb cd _ (dl:dls) =
                                           && (poi prev < lena && poj prev < lenb =>
                                                _kdiag (head v) == _kdiag prev - 1)} / [len rest] @-}
     stepAndMerge prev dls =
-      -- The vertical coordinate of a node being out-of-bounds
-      -- implies upcoming nodes are as well because they lie on
-      -- lower diagonals than the former node.
+      -- When a node lying on the bottom boundary is found on the wave front
+      -- all upcoming nodes are discarted because their in-bound childs would
+      -- eventually need to cross the former's diagonal (in /more/ steps)
+      -- to reach the endpoint, and thus are not SES candidates.
       if poj prev >= lenb then []
       else case dls of
         [] -> [addsnake lena lenb cd $ vStep prev]

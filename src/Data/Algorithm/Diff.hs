@@ -400,7 +400,7 @@ dstep lena lenb cd _ (dl:dls) =
       else case dls of
         [] -> [addsnake lena lenb cd $ vStep prev]
         (next:rest) ->
-            if poi next >= lena then addsnake lena lenb cd (vStep prev) : stepAndMerge next rest
+            if poi next >= lena then stepAndMerge next rest
             else
               addsnake lena lenb cd (furthestReaching (vStep prev) (hStep next)) : stepAndMerge next rest
 

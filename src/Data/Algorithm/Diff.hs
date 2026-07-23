@@ -353,7 +353,7 @@ dstep
   -> jb : Nat
   -> DiagPred ib jb
   -> d : Nat
-  -> {nodes : WaveFront ib jb d | len nodes > 0}
+  -> {nodes : WaveFront ib jb d | len nodes > 0 && not (endPoint ib jb (head nodes))}
   -> {v : WaveFront ib jb (d + 1) | len v > 0}
 @-}
 dstep
@@ -387,9 +387,9 @@ dstep lena lenb cd _ (dl:dls) =
     {-@ stepAndMerge
           :: prev: DLN lena lenb _d
           -> rest : {xs : [DLN lena lenb _d] | _wfDiags (_kdiag prev - 2) rest}
-          -> {v : [DLN lena lenb (_d + 1)] | _wfDiags (_kdiag (head v)) v
-                                          && (poj prev < lenb => len v > 0)
-                                          && (poi prev < lena && poj prev < lenb =>
+          -> {v : [DLN lena lenb (_d + 1)] | _wfDiags (_kdiag prev - 1) v
+                                          && (poj prev < lenb <=> len v > 0)
+                                          && (len v > 0 =>
                                                _kdiag (head v) == _kdiag prev - 1)} / [len rest] @-}
     stepAndMerge prev dls =
       -- When a node lying on the bottom boundary is found on the wave front

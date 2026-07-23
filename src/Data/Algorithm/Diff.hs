@@ -368,10 +368,12 @@ dstep
 -- to GHC removing it when desugaring multi-equation definitions.
 -- See https://github.com/ucsd-progsys/liquidhaskell/issues/2704
 dstep lena lenb _ _d [] = error "dstep: Cannot perform expansion on an empty list of nodes"
-dstep lena lenb cd _ (dl:dls) =
-  if poi dl >= lena then stepAndMerge dl dls
-  else
-    addsnake lena lenb cd (hStep dl) : stepAndMerge dl dls
+dstep lena lenb cd _ dls0 =
+  case dropUntilLastDLOnRight lena dls0 of
+    (dl, dls) ->
+      if poi dl >= lena then stepAndMerge dl dls
+      else
+        addsnake lena lenb cd (hStep dl) : stepAndMerge dl dls
   where
     {-@ hStep
           :: x : DLN lena lenb _d
@@ -386,7 +388,7 @@ dstep lena lenb cd _ (dl:dls) =
     -- and extend it along matching elements.
     {-@ stepAndMerge
           :: prev: DLN lena lenb _d
-          -> rest : {xs : [DLN lena lenb _d] | _wfDiags (_kdiag prev - 2) rest}
+          -> rest : {xs : [{v:DLN lena lenb _d | poi v < lena}] | _wfDiags (_kdiag prev - 2) rest}
           -> {v : [DLN lena lenb (_d + 1)] | _wfDiags (_kdiag prev - 1) v
                                           && (poj prev < lenb <=> len v > 0)
                                           && (len v > 0 =>
@@ -400,9 +402,18 @@ dstep lena lenb cd _ (dl:dls) =
       else case dls of
         [] -> [addsnake lena lenb cd $ vStep prev]
         (next:rest) ->
-            if poi next >= lena then stepAndMerge next rest
-            else
-              addsnake lena lenb cd (furthestReaching (vStep prev) (hStep next)) : stepAndMerge next rest
+           addsnake lena lenb cd (furthestReaching (vStep prev) (hStep next)) : stepAndMerge next rest
+
+{-@
+assume dropUntilLastDLOnRight
+         :: lena:Int -> [DL] -> (DL, [{v:DL| poi v < lena}])
+@-}
+dropUntilLastDLOnRight :: Int -> [DL] -> (DL, [DL])
+dropUntilLastDLOnRight lena (dl:dls) =
+    case dropWhile ((< lena) . poi) dls of
+      [] -> (dl, dls)
+      dls1 -> dropUntilLastDLOnRight lena dls1
+
 
 {-@ lazy addsnake@-}
 -- | Follow a /snake/ from the current position of a 'DL' node.

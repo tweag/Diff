@@ -25,7 +25,7 @@ doBenchMarks seed =
       (s1000_1, rbools1) = splitAt 1000 rbools
       (s1000_2, rbools2) = splitAt 1000 rbools1
       s500_2 = take 500 s1000_2
-  in s1000_1 `deepseq` s1000_2 `deepseq` defaultMain
+  in s1000_1 `deepseq` s1000_2 `deepseq` s500_2 `deepseq` defaultMain
       [ bgroup "diff bool lists"
           [ bench "1000 bools" $ nf (getDiff s1000_1) s1000_2
           , bench "1000/500 bools" $ nf (getDiff s1000_1) s500_2

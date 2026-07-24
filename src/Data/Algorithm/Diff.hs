@@ -368,8 +368,8 @@ dstep
 -- to GHC removing it when desugaring multi-equation definitions.
 -- See https://github.com/ucsd-progsys/liquidhaskell/issues/2704
 dstep lena lenb _ _d [] = error "dstep: Cannot perform expansion on an empty list of nodes"
-dstep lena lenb cd _ dls0 =
-  case dropUntilLastDLOnRight lena dls0 of
+dstep lena lenb cd _ (dl0:dls0) =
+  case dropUntilLastDLOnRight lena dl0 dls0 of
     (dl, dls) ->
       if poi dl >= lena then stepAndMerge dl dls
       else
@@ -406,13 +406,13 @@ dstep lena lenb cd _ dls0 =
 
 {-@
 assume dropUntilLastDLOnRight
-         :: lena:Int -> [DL] -> (DL, [{v:DL| poi v < lena}])
+         :: lena:Int -> DL -> [DL] -> (DL, [{v:DL| poi v < lena}])
 @-}
-dropUntilLastDLOnRight :: Int -> [DL] -> (DL, [DL])
-dropUntilLastDLOnRight lena (dl:dls) =
+dropUntilLastDLOnRight :: Int -> DL -> [DL] -> (DL, [DL])
+dropUntilLastDLOnRight lena dl dls =
     case dropWhile ((< lena) . poi) dls of
       [] -> (dl, dls)
-      dls1 -> dropUntilLastDLOnRight lena dls1
+      dl1:dls1 -> dropUntilLastDLOnRight lena dl1 dls1
 
 
 {-@ lazy addsnake@-}

@@ -1,3 +1,4 @@
+{-# LANGUAGE ScopedTypeVariables #-}
 {-@ LIQUID "--ple" @-}
 {-@ LIQUID "--etabeta" @-}
 {-@ LIQUID "--higherorder" @-}
@@ -77,7 +78,7 @@ module Data.Algorithm.Diff
     ) where
 
 import Prelude hiding (pi)
-import Data.Array (listArray, (!))
+import Data.Array.IArray
 import Data.Bifunctor
 import Data.Foldable (find)
 import Internal.LiftedFunctions
@@ -312,7 +313,7 @@ canDiag :: (a -> b -> Bool)
         -> lenb : Int
         -> DiagPred lena lenb
 @-}
-canDiag :: (a -> b -> Bool) -- ^ Custom equality predicate
+canDiag :: forall a b. (a -> b -> Bool) -- ^ Custom equality predicate
         -> [a] -- ^ First input
         -> [b] -- ^ Second input
         -> Int -- ^ First input's length
@@ -322,8 +323,8 @@ canDiag eq as bs lena lenb = \i j ->
   (i < lena && j < lenb) && ((arAs ! i) `eq` (arBs ! j))
   where
     -- Lists are converted into arrays to have O(1) lookups.
-    arAs = listArray (0,lena - 1) as
-    arBs = listArray (0,lenb - 1) bs
+    arAs = listArray (0,lena - 1) as :: Array Int a
+    arBs = listArray (0,lenb - 1) bs :: Array Int b
 
 -- | Perform one breadth-first search expansion step, advancing every wave front
 -- 'DL' node by one 'DI' edit (one non-diagonal edge) and then following
@@ -361,17 +362,25 @@ dstep
   -> Int                  -- ^ Second input's length.
   -> (Int -> Int -> Bool) -- ^ Diagonal predicate
   -> Int                  -- ^ The current D-length; used for the static check of wave front invariant.
-  -> [DL]                 -- ^ A non-empty wave front of nodes at edit distance D
-  -> [DL]                 -- ^ A non-empty wave front of nodes at edit distance D+1
+  -> Array Int DL         -- ^ A non-empty wave front of nodes at edit distance D
+  -> Array Int DL                 -- ^ A non-empty wave front of nodes at edit distance D+1
 -- NOTE: @_d@ is a phantom (apparently unused) parameter required by local LiquidHaskell specifications.
 -- This parameter sits at the first equation as a workaround
 -- to GHC removing it when desugaring multi-equation definitions.
 -- See https://github.com/ucsd-progsys/liquidhaskell/issues/2704
-dstep lena lenb _ _d [] = error "dstep: Cannot perform expansion on an empty list of nodes"
-dstep lena lenb cd _ (dl:dls) =
-  if poi dl >= lena then stepAndMerge dl dls
-  else
-    addsnake lena lenb cd (hStep dl) : stepAndMerge dl dls
+dstep lena lenb cd _ dls =
+  let i0 = findRightNode $ snd $ bounds dls
+      i1 = findBottomNode i0
+      i0' = if poi (dls ! i0) >= lena then i0 + 1 else i0
+      i1' = if poj (dls ! i1) >= lenb then i1 - 1 else i1
+   in
+      genArray (0, i1' - i0' + 1) $ \i ->
+        if i + i0' == i0 then
+          addsnake lena lenb cd (hStep (dls ! i0))
+        else if i + i0' == i1 + 1 then
+          addsnake lena lenb cd (vStep (dls ! i1))
+        else
+          addsnake lena lenb cd $ furthestReaching (vStep (dls ! (i0' + i - 1))) (hStep (dls ! (i0' + i)))
   where
     {-@ hStep
           :: x : DLN lena lenb _d
@@ -381,28 +390,16 @@ dstep lena lenb cd _ (dl:dls) =
           :: x : DLN lena lenb _d
           -> {v : DL | len (path v) = _d + 1 && poi v = poi x && poj v = poj x + 1} @-}
     vStep node = node {poj = poj node + 1, path = S : path node}
-    -- Merge vertical step of previous node with horizontal step of next node,
-    -- selecting the furthest-reaching candidate for each shared k-diagonal,
-    -- and extend it along matching elements.
-    {-@ stepAndMerge
-          :: prev: DLN lena lenb _d
-          -> rest : {xs : [DLN lena lenb _d] | _wfDiags (_kdiag prev - 2) rest}
-          -> {v : [DLN lena lenb (_d + 1)] | _wfDiags (_kdiag prev - 1) v
-                                          && (poj prev < lenb <=> len v > 0)
-                                          && (len v > 0 =>
-                                               _kdiag (head v) == _kdiag prev - 1)} / [len rest] @-}
-    stepAndMerge prev dls =
-      -- When a node lying on the bottom boundary is found on the wave front
-      -- all upcoming nodes are discarted because their in-bound childs would
-      -- eventually need to cross the former's diagonal (in /more/ steps)
-      -- to reach the endpoint, and thus are not SES candidates.
-      if poj prev >= lenb then []
-      else case dls of
-        [] -> [addsnake lena lenb cd $ vStep prev]
-        (next:rest) ->
-            if poi next >= lena then stepAndMerge next rest
-            else
-              addsnake lena lenb cd (furthestReaching (vStep prev) (hStep next)) : stepAndMerge next rest
+
+    findRightNode :: Int -> Int
+    findRightNode i
+        | i > 0 && poi (dls ! i) < lena = findRightNode (i - 1)
+        | otherwise = i
+
+    findBottomNode :: Int -> Int
+    findBottomNode i
+        | i < snd (bounds dls) && poj (dls ! i) < lenb = findBottomNode (i + 1)
+        | otherwise = i
 
 {-@ lazy addsnake@-}
 -- | Follow a /snake/ from the current position of a 'DL' node.
@@ -464,23 +461,28 @@ addsnake ib jb cd dl
 -- and space complexity — \( O(ND) \) and \( O(D^2) \) respectively — is
 -- unchanged.
 ses :: (a -> b -> Bool) -> [a] -> [b] -> [DI]
-ses eq as bs = search 0 [addsnake lena lenb cd (DL 0 0 [])]
+ses eq as bs = search 0 (genArray (0, 0) (\_ -> addsnake lena lenb cd (DL 0 0 [])))
             where cd = canDiag eq as bs lena lenb
                   lena = length as; lenb = length bs
                   {-@ search :: d : Nat
                              -> dls : WaveFront lena lenb d
                              -> {v : [DI] | len v = d}
                              / [_minDistanceToGoal lena lenb dls] @-}
-                  search :: Int -> [DL] -> [DI]
-                  search _ [] = error "ses: The search must have a seed node"
+                  search :: Int -> Array Int DL -> [DI]
                   search d wf = case findEndpoint lena lenb wf of
                       Just p  -> path p
                       Nothing -> search (d + 1) (dstep lena lenb cd d wf)
                   {-@ assume findEndpoint :: i : Nat -> j : Nat -> xs : [DL]
                                           -> { m : Maybe {dl : DL | endPoint i j dl}
                                              | m == Nothing => _minDistanceToGoal i j xs > 0} @-}
-                  findEndpoint :: Int -> Int -> [DL] -> Maybe DL
-                  findEndpoint i j = find (endPoint i j)
+                  findEndpoint :: Int -> Int -> Array Int DL -> Maybe DL
+                  findEndpoint i j = findArray (endPoint i j) 0
+
+                  findArray :: (a -> Bool) -> Int -> Array Int a -> Maybe a
+                  findArray p i arr
+                    | i > snd (bounds arr) = Nothing
+                    | p (arr ! i) = Just (arr ! i)
+                    | otherwise = findArray p (i + 1) arr
 
 -- | Takes two lists and returns a list of differences between them. This is
 -- 'getDiffBy' with '==' used as predicate.

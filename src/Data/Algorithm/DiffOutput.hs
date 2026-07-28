@@ -137,27 +137,23 @@ parsePrettyDiffs = reverse . doParse [] . lines
                 ('c':hrs2) -> parseChange r1 hrs2 rs
                 _ -> (Nothing,rs)
 
-    {-@ parseDel :: (Nat, Nat) -> String -> rs:[String] -> {v:(Maybe (DiffOperation ValidLineRange), [String]) | len (snd v) <= len rs} @-}
+    {-@ parseDel :: (Nat1, Nat) -> String -> rs:[String] -> {v:(Maybe (DiffOperation ValidLineRange), [String]) | len (snd v) <= len rs} @-}
     parseDel :: (LineNo, LineNo) -> String -> [String] -> (Maybe (DiffOperation LineRange), [String])
     parseDel r1 hrs2 rs = let
         (r2,_) = parseRange hrs2
         (ls,rs2) = span (isPrefixOf "<") rs
         contents = map (drop 2) ls
-        in case contents of
-            (_:_) -> (Just $ Deletion (mkLineRange (fst r1) contents) (fst r2), rs2)
-            _ -> (Nothing, rs2)
+        in (Just $ Deletion (mkLineRange (fst r1) contents) (fst r2), rs2)
 
-    {-@ parseAdd :: (Nat, Nat) -> String -> rs:[String] -> {v:(Maybe (DiffOperation ValidLineRange), [String]) | len (snd v) <= len rs} @-}
+    {-@ parseAdd :: (Nat1, Nat) -> String -> rs:[String] -> {v:(Maybe (DiffOperation ValidLineRange), [String]) | len (snd v) <= len rs} @-}
     parseAdd :: (LineNo, LineNo) -> String -> [String] -> (Maybe (DiffOperation LineRange), [String])
     parseAdd r1 hrs2 rs = let
         (r2,_) = parseRange hrs2
         (ls,rs2) = span (isPrefixOf ">") rs
         contents = map (drop 2) ls
-        in case contents of
-            (_:_) -> (Just $ Addition (mkLineRange (fst r2) contents) (fst r1), rs2)
-            _ -> (Nothing, rs2)
+        in (Just $ Addition (mkLineRange (fst r2) contents) (fst r1), rs2)
 
-    {-@ parseChange :: (Nat, Nat) -> String -> rs:[String] -> {v:(Maybe (DiffOperation ValidLineRange), [String]) | len (snd v) <= len rs} @-}
+    {-@ parseChange :: (Nat1, Nat) -> String -> rs:[String] -> {v:(Maybe (DiffOperation ValidLineRange), [String]) | len (snd v) <= len rs} @-}
     parseChange :: (LineNo, LineNo) -> String -> [String] -> (Maybe (DiffOperation LineRange), [String])
     parseChange r1 hrs2 rs = let
         (r2,_) = parseRange hrs2
@@ -168,16 +164,14 @@ parsePrettyDiffs = reverse . doParse [] . lines
                 (ls2,rs4) = span (isPrefixOf ">") rs3
                 contents1 = map (drop 2) ls1
                 contents2 = map (drop 2) ls2
-                in case (contents1, contents2) of
-                    (_:_, _:_) -> (Just $ Change (mkLineRange (fst r1) contents1) (mkLineRange (fst r2) contents2), rs4)
-                    _ -> (Nothing, rs4)
+                in (Just $ Change (mkLineRange (fst r1) contents1) (mkLineRange (fst r2) contents2), rs4)
             _ -> (Nothing,rs2)
 
-    {-@ parseRange :: String -> {v : ((Nat, Nat), String) | fst (fst v) <= snd (fst v)} @-}
+    {-@ parseRange :: String -> {v : ((Nat1, Nat), String) | validRange (fst v)} @-}
     parseRange :: String -> ((LineNo, LineNo), String)
     parseRange l = let
         (fstLine,rs) = span isDigit l
-        a = max 0 (read fstLine)
+        a = max 1 (read fstLine)
         (sndLine,rs3) = case rs of
                                     -- The comma is used to separate
                                     -- the start and end line numbers in a range,
@@ -185,7 +179,7 @@ parsePrettyDiffs = reverse . doParse [] . lines
                                     -- i.e. the range is a single line.
                                     (',':rs2) -> span isDigit rs2
                                     _ -> (fstLine,rs)
-        b = max a (read sndLine)
+        b = max (a - 1) (read sndLine)
         in ((a, b), rs3)
 
 -- | Line number alias. Always non-negative.
@@ -209,14 +203,16 @@ data LineRange = LineRange { lrNumbers :: (LineNo, LineNo)
                            }
             deriving (Show, Read, Eq, Ord)
 
-{-@ predicate validRange Start End ContentLenght = Start >= 0 && End >= 0 && Start <= End && ContentLenght = End - Start + 1 @-}
+{-@ predicate validLineRange Start End ContentLenght = Start >= 1 && End >= 0 && Start <= End + 1 && ContentLenght = End - Start + 1 @-}
 
-{-@ type ValidLineRange = {r : LineRange | validRange (fst (lrNumbers r)) (snd (lrNumbers r)) (len (lrContents r))} @-}
+{-@ predicate validRange R = fst R <= snd R + 1 @-}
+
+{-@ type ValidLineRange = {r : LineRange | validLineRange (fst (lrNumbers r)) (snd (lrNumbers r)) (len (lrContents r))} @-}
 
 -- | Smart constructor for 'LineRange' that computes the end line from the
 -- start line and the content length, guaranteeing that its content length and
 -- range match.
-{-@ mkLineRange :: Nat -> {contents : [String] | len contents >= 1} -> ValidLineRange @-}
+{-@ mkLineRange :: Nat1 -> [String] -> ValidLineRange @-}
 mkLineRange :: Int -> [String] -> LineRange
 mkLineRange start contents = LineRange (start, start + length contents - 1) contents
 
@@ -228,3 +224,5 @@ data DiffOperation a
                        -- preceding the added lines in the left input.
   | Change a a         -- ^ Element changed from the left input to the right input.
   deriving (Show,Read,Eq,Ord)
+
+{-@ type Nat1 = { n:Int | n >= 1 }@-}

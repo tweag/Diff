@@ -78,7 +78,6 @@ import Data.Array (listArray, (!))
 import Data.Algorithm.Diff.Type
 import Data.Algorithm.Diff.Refinement (fst3, snd3, thd3, headIsFirst,
                                         headIsSecond, headIsBoth, noStuttering)
-import Data.Foldable (find)
 
 -- | /Diff Instruction/ — an internal enum recording the direction of a single
 -- non-diagonal edge traversed in the Myers edit graph. Every non-diagonal
@@ -354,13 +353,17 @@ ses eq as bs = path $ searchEndpoint 0 [addsnake lena lenb cd (DL 0 0 [])]
     -- The abstract refinement @q@ lets 'find' carry the wave
     -- front element refinement (notably @len (path dl) == d@)
     -- over to the returned endpoint.
-    {-@ assume findEndpoint
+    {-@ findEndpoint
           :: i : Nat -> j : Nat -> d : Nat
-          -> xs : [DLN i j d]
-          -> { m : Maybe ({x : DLN i j d | endPoint i j x})
-             | m == Nothing => _wfDistanceToGoal i j xs > 0 } @-}
+          -> wf : [DLN i j d]
+          -> { m : Maybe ({dl : DLN i j d | endPoint i j dl})
+             | m == Nothing => _wfDistanceToGoal i j wf > 0 }
+          / [len wf] @-}
     findEndpoint :: Int -> Int -> Int -> [DL] -> Maybe DL
-    findEndpoint i j _ = find (endPoint i j)
+    findEndpoint _ _ _ [] = Nothing
+    findEndpoint i j d (dl:dls) = if endPoint i j dl
+                                  then Just dl
+                                  else findEndpoint i j d dls
 
 -- | Takes two lists and returns a list of differences between them. This is
 -- 'getDiffBy' with '==' used as predicate.

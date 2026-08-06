@@ -134,6 +134,9 @@ data DL = DL
 -- having a fixed /D-length/.
 {-@ type DLN M N D = { x : DL | len (path x) = D && _withinBounds M N x} @-}
 
+-- The endpoint node: a 'DLN' that has reached the goal position.
+{-@ type Endpoint M N D = { x : DLN M N D | endPoint M N x } @-}
+
 {-@ inline _kdiag @-}
 -- | Computes the k-diagonal of a node.
 -- Used in LiquidHaskell logic as an expression.
@@ -287,7 +290,7 @@ _reducesDistanceToGoal lena lenb wf1 wf2 = _wfDistanceToGoal lena lenb wf2 < _wf
 _withinBounds :: Int -> Int -> DL -> Bool
 _withinBounds lena lenb dl = poi dl <= lena && poj dl <= lenb
 
-{-@ inline endPoint @-}
+{-@ reflect endPoint @-}
 endPoint :: Int -> Int -> DL -> Bool
 endPoint lena lenb dl = poi dl == lena && poj dl == lenb
 
@@ -488,7 +491,7 @@ ses eq as bs = search 0 [addsnake lena lenb cd (DL 0 0 [])]
                              / [_wfDistanceToGoal lena lenb dls] @-}
                   search :: Int -> [DL] -> [DI]
                   search _ [] = error "ses: The search must have a seed node"
-                  search d wf = case findEndpoint lena lenb wf of
+                  search d wf = case findEndpoint lena lenb d wf of
                       Just p  -> path p
                       Nothing -> let wf' = dstep lena lenb cd d wf
                                  in search (d + 1)
@@ -496,12 +499,12 @@ ses eq as bs = search 0 [addsnake lena lenb cd (DL 0 0 [])]
                   -- The abstract refinement @q@ lets 'find' carry the wave
                   -- front element refinement (notably @len (path dl) == d@)
                   -- over to the returned endpoint.
-                  {-@ assume findEndpoint :: forall <q :: DL -> Bool>.
-                                             i : Nat -> j : Nat -> xs : [DL<q>]
-                                          -> { m : Maybe {dl : DL<q> | endPoint i j dl}
-                                             | m == Nothing => _wfDistanceToGoal i j xs > 0} @-}
-                  findEndpoint :: Int -> Int -> [DL] -> Maybe DL
-                  findEndpoint i j = find (endPoint i j)
+                  {-@ assume findEndpoint :: i : Nat -> j : Nat -> d : Nat
+                                   -> xs : [DLN i j d]
+                                   -> { m : Maybe (Endpoint i j d)
+                                        | m == Nothing => _wfDistanceToGoal i j xs > 0} @-}
+                  findEndpoint :: Int -> Int -> Int -> [DL] -> Maybe DL
+                  findEndpoint i j _d wf = find (endPoint i j) wf
 
 -- | Takes two lists and returns a list of differences between them. This is
 -- 'getDiffBy' with '==' used as predicate.

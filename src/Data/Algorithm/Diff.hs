@@ -346,7 +346,7 @@ ses eq as bs = path $ searchEndpoint 0 [addsnake lena lenb cd (DL 0 0 [])]
           / [_wfDistanceToGoal lena lenb dls] @-}
     searchEndpoint :: Int -> [DL] -> DL
     searchEndpoint _ [] = error "ses: The search must have a seed node"
-    searchEndpoint d wf = case findEndpoint lena lenb wf of
+    searchEndpoint d wf = case findEndpoint lena lenb d wf of
       Just p  -> p
       Nothing -> let wf' = dstep lena lenb cd d wf
                      _lemmaNonNeg = _minDistanceNonNegative lena lenb wf'
@@ -355,12 +355,12 @@ ses eq as bs = path $ searchEndpoint 0 [addsnake lena lenb cd (DL 0 0 [])]
     -- front element refinement (notably @len (path dl) == d@)
     -- over to the returned endpoint.
     {-@ assume findEndpoint
-          :: forall <q :: DL -> Bool>.
-             i : Nat -> j : Nat -> xs : [DL<q>]
-          -> { m : Maybe {dl : DL<q> | endPoint i j dl}
-             | m == Nothing => _wfDistanceToGoal i j xs > 0} @-}
-    findEndpoint :: Int -> Int -> [DL] -> Maybe DL
-    findEndpoint i j = find (endPoint i j)
+          :: i : Nat -> j : Nat -> d : Nat
+          -> xs : [DLN i j d]
+          -> { m : Maybe ({x : DLN i j d | endPoint i j x})
+             | m == Nothing => _wfDistanceToGoal i j xs > 0 } @-}
+    findEndpoint :: Int -> Int -> Int -> [DL] -> Maybe DL
+    findEndpoint i j _ = find (endPoint i j)
 
 -- | Takes two lists and returns a list of differences between them. This is
 -- 'getDiffBy' with '==' used as predicate.
@@ -578,7 +578,7 @@ _reducesDistanceToGoal lena lenb wf1 wf2 =
 _withinBounds :: Int -> Int -> DL -> Bool
 _withinBounds lena lenb dl = poi dl <= lena && poj dl <= lenb
 
-{-@ inline endPoint @-}
+{-@ reflect endPoint @-}
 endPoint :: Int -> Int -> DL -> Bool
 endPoint lena lenb dl = poi dl == lena && poj dl == lenb
 

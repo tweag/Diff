@@ -234,7 +234,12 @@ dstep lena lenb _ _d [] = error "dstep: Cannot perform expansion on an empty lis
 -- This definition branches according to whether a node is on a boundary
 -- to avoid constructing out-of-bound nodes and discarding other non-competing nodes.
 dstep lena lenb cd _ (dl:dls) =
-  if poi dl >= lena then stepAndMerge dl dls
+  if poi dl >= lena then
+    -- @stepAndMerge dl dls@ yields a wave front anchored at @_kdiag dl + 1@
+    -- whose head lies on the right boundary; re-anchor it to the canonical
+    -- 'WaveFront' index so it matches @dstep@'s result invariant.
+    let sm = stepAndMerge dl dls
+     in sm `const` _wfDiagsHeadReindex lena (_kdiag dl + 1) sm
   else
     (addsnake lena lenb cd (hStep dl) : stepAndMerge dl dls)
       -- If @dl@ lies on the bottom boundary, @stepAndMerge dl dls@ discards
@@ -247,12 +252,12 @@ dstep lena lenb cd _ (dl:dls) =
     -- and extend it along matching elements.
     {-@ stepAndMerge
           :: prev : DLN lena lenb _d
-          -> nodes : {xs : [DLN lena lenb _d] | _wfDiags (_kdiag prev - 2) xs
+          -> nodes : {xs : [DLN lena lenb _d] | _wfDiags lena (_kdiag prev) xs
                                              && _wfDistanceToGoal lena lenb xs > 0}
           -> {v : [DLN lena lenb (_d + 1)]
-             |  _wfDiags (_kdiag prev - 1) v
+             |  _wfDiags lena (_kdiag prev + 1) v
              && (poj prev < lenb <=> len v > 0)
-             && (len v > 0 => _kdiag (head v) == _kdiag prev - 1)
+             && (len v > 0 && poi prev >= lena => poi (head v) >= lena)
              && (len v > 0 =>
                    _wfDistanceToGoal lena lenb v < _manhattanDistance lena lenb prev)
              && (len v > 0 =>
@@ -272,7 +277,13 @@ dstep lena lenb cd _ (dl:dls) =
             -- However, we keep @prev@'s vertical child node to preserve
             -- the '_wfDiags' invariant at a negligible performance penalty.
             -- See [NOTE: diagonal-invariant]
-            if poi next >= lena then vStep prev : stepAndMerge next rest
+            if poi next >= lena then
+              -- @next@ is on the right boundary, so its merged child is dropped
+              -- and the successors form a wave front anchored at @_kdiag next + 1@.
+              -- Re-anchor it to @_kdiag prev + 1@: the boundary head admits the
+              -- wider diagonal gap left by the dropped node.
+              let sm = stepAndMerge next rest
+               in sm `const` _wfDiagsReindex lena (_kdiag next + 1) (_kdiag prev + 1) sm
             else
               (addsnake lena lenb cd (furthestReaching (vStep prev) (hStep next)) : stepAndMerge next rest)
                 -- If @next@ lies on the bottom boundary, the recursive call
@@ -482,14 +493,19 @@ _kdiag :: DL -> Int
 _kdiag dl = poi dl - poj dl
 
 {-@ reflect _wfDiags @-}
-{-@ _wfDiags :: Int -> xs : [DL] -> Bool / [len xs] @-}
+{-@ _wfDiags :: Int -> Int -> xs : [DL] -> Bool / [len xs] @-}
 -- | Checks if succesive nodes of a wave front lie within k-diagonals
 -- differing by 2 as described in the Myers algorithm.
 -- Used in LiquidHaskell logic as a predicate.
 -- See [NOTE: diagonal-invariant]
-_wfDiags :: Int -> [DL] -> Bool
-_wfDiags _ [] = True
-_wfDiags k (dl:dls) = _kdiag dl == k && _wfDiags (k - 2) dls
+_wfDiags :: Int -> Int -> [DL] -> Bool
+_wfDiags _ _ [] = True
+_wfDiags lena k (dl:dls) =
+    (poi dl < lena && poi dl - poj dl == k - 2
+      ||
+     poi dl >= lena && mod (k - (poi dl - poj dl)) 2 == 0 && poi dl - poj dl <= k - 2
+    ) &&
+    _wfDiags lena (poi dl - poj dl) dls
 
 --------------------------------------------------------------------------------
 -- [NOTE: diagonal-invariant]
@@ -535,7 +551,7 @@ _wfDiags k (dl:dls) = _kdiag dl == k && _wfDiags (k - 2) dls
 -- A wave front is a list of 'DL' nodes, all at the same edit distance @D@,
 -- with k-diagonals @D@, @D−2@, …, @-D+2@, @-D@.
 -- See [NOTE: diagonal-invariant]
-{-@ type WaveFront M N D = {xs : [DLN M N D] | _wfDiags (_kdiag (head xs)) xs} @-}
+{-@ type WaveFront M N D = {xs : [DLN M N D] | _wfDiags M (_kdiag (head xs) + 2) xs} @-}
 
 --------------------------------------------------------------------------------
 -- * Proving the Algorithm's Termination in LiquidHaskell
@@ -622,12 +638,12 @@ endPoint lena lenb dl = poi dl == lena && poj dl == lenb
 -- @
 {-@ _wfDistanceLowerBoundK
       :: lena : Nat -> lenb : Nat -> {k : Int | lenb + k + 2 >= 0}
-      -> xs : {v : [{dl : DL | _withinBounds lena lenb dl}] | _wfDiags k v}
+      -> xs : {v : [{dl : DL | _withinBounds lena lenb dl}] | _wfDiags lena (k + 2) v}
       -> {_wfDistanceToGoal lena lenb xs >= lena - lenb - k}
       / [len xs] @-}
 _wfDistanceLowerBoundK :: Int -> Int -> Int -> [DL] -> ()
 _wfDistanceLowerBoundK _    _    _ []      = ()
-_wfDistanceLowerBoundK lena lenb k (_:dls) = _wfDistanceLowerBoundK lena lenb (k - 2) dls
+_wfDistanceLowerBoundK lena lenb k (dl:dls) = _wfDistanceLowerBoundK lena lenb (poi dl - poj dl - 2) dls
 
 -- | If a wave front's node (@prev@) is on the bottom boundary, then the following
 -- nodes lie farther from the goal. Intuitively, the reason is that the following
@@ -637,7 +653,7 @@ _wfDistanceLowerBoundK lena lenb k (_:dls) = _wfDistanceLowerBoundK lena lenb (k
 {-@
 _wfDistanceLowerBound
       :: lena : Nat -> lenb : Nat -> {prev : DL | _withinBounds lena lenb prev}
-      -> xs : {v : [{dl : DL | _withinBounds lena lenb dl}] | _wfDiags (_kdiag prev - 2) v}
+      -> xs : {v : [{dl : DL | _withinBounds lena lenb dl}] | _wfDiags lena (_kdiag prev) v}
       -> { poj prev >= lenb =>  _wfDistanceToGoal lena lenb xs > _manhattanDistance lena lenb prev}
  @-}
 _wfDistanceLowerBound :: Int -> Int -> DL -> [DL] -> ()
@@ -646,6 +662,34 @@ _wfDistanceLowerBound lena lenb prev xs@(_:_) = ()
   where
     _lemma = _wfDistanceLowerBoundK lena lenb (_kdiag prev - 2) xs
 
+-- | Relax the leading diagonal index of a wave front whose head lies on the
+-- right boundary (@poi >= lena@). Because such a head is only constrained by
+-- the /out-of-bounds/ clause of '_wfDiags' (any lower diagonal of matching
+-- parity is admissible), a wave front anchored at @k1@ is also a valid wave
+-- front anchored at any larger @k2@ of the same parity. This lets a dropped
+-- boundary node's successor be spliced after an earlier node whose diagonal is
+-- more than two greater.
+{-@ _wfDiagsReindex
+      :: lena : Int -> k1 : Int -> {k2 : Int | k1 <= k2 && (k2 - k1) mod 2 == 0}
+      -> v : {xs : [DL] | _wfDiags lena k1 xs
+                       && (len xs > 0 => poi (head xs) >= lena)}
+      -> {_wfDiags lena k2 v}
+      / [len v] @-}
+_wfDiagsReindex :: Int -> Int -> Int -> [DL] -> ()
+_wfDiagsReindex _    _  _  []       = ()
+_wfDiagsReindex _    _  _  (_:_)    = ()
+
+-- | Re-anchor a wave front whose head lies on the right boundary
+-- (@poi >= lena@) to the canonical 'WaveFront' index @_kdiag (head v) + 2@.
+-- The boundary head trivially satisfies the out-of-bounds clause at this index,
+-- so only the shared tail obligation carries over from the @k@-anchored form.
+{-@ _wfDiagsHeadReindex
+      :: lena : Int -> k : Int
+      -> v : {xs : [DL] | len xs > 0 && poi (head xs) >= lena && _wfDiags lena k xs}
+      -> {_wfDiags lena (_kdiag (head v) + 2) v}
+      / [len v] @-}
+_wfDiagsHeadReindex :: Int -> Int -> [DL] -> ()
+_wfDiagsHeadReindex _    _ (_:_) = ()
 
 -- | The termination metric is non-negative: every in-bounds node has a
 -- non-negative manhattan distance to the goal, and the empty wave front

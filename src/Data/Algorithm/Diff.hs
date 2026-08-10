@@ -125,81 +125,6 @@ data DL = DL
                      --   'S' steps are stored.
     } deriving (Show, Eq)
 
--- Field refinements are implemented with measures, which means they are
--- available only when a 'DL' value is pattern matched;
--- This invariant on DLs makes the coordinates non-negativity available
--- for any value of type 'DL' regardless of whether it has been pattern matched.
-{-@ using (DL) as { dl : DL | poi dl >= 0 && poj dl >= 0 } @-}
-
--- A "D-path location node" is a 'DL' value within the edit grid bounds
--- having a fixed /D-length/.
-{-@ type DLN M N D = { x : DL | len (path x) = D && _withinBounds M N x} @-}
-
-{-@ reflect _kdiag @-}
--- | Computes the k-diagonal of a node.
--- Used in LiquidHaskell logic as an expression.
-_kdiag :: DL -> Int
-_kdiag dl = poi dl - poj dl
-
-{-@ reflect _wfDiags @-}
-{-@ _wfDiags :: Int -> xs : [DL] -> Bool / [len xs] @-}
--- | Checks if succesive nodes of a wave front lie within k-diagonals
--- differing by 2 as described in the Myers algorithm.
--- Used in LiquidHaskell logic as a predicate.
-_wfDiags :: Int -> [DL] -> Bool
-_wfDiags _ [] = True
-_wfDiags k (dl:dls) = _kdiag dl == k && _wfDiags (k - 2) dls
-
---------------------------------------------------------------------------------
--- [NOTE: diagonal-invariant]
---
--- The '_wfDiags' predicate states that succesive nodes in a wave front lie
--- on diagonals whose indices differ by two. This is leveraged by LiquidHaskell
--- to check that the 'furthestReaching' precondition stating that the two nodes
--- it compares lie on the same diagonal is satisfied within `dstep`.
--- However, even though a more flexible predicate could be used to prove it,
--- a compromise was made in preserving this invariant to keep the specification
--- complexity low at a negligible performance penalty cost.
--- This note documents this compromise.
---
--- To prove 'ses' terminates, wave fronts are restricted to be within the
--- edit grid. This is done by placing checks for boundary nodes within 'dstep'
--- to avoid constructing nodes outside the grid. 'dstep' leverages such checks
--- in optimizations that rely on the observation that boundary nodes signal
--- other nodes cannot compete to the goal:
---
---  * If a bottom boundary is found, all subsequent nodes are not considered.
---
---  * If a right boundary is found, all previously constructed child nodes
---    can be dropped.
---
--- Both preserve the diagonal invariant, as the wave front would just become
--- narrower. However, due to the asymmetry of list traversal, the first one is
--- readily implemented, while the second requires an additional operation whose
--- cost trumps the gain of not keeping them for next iterations (according to the
--- existing benchmarks). Because of this, and 'stepAndMege' looking a two
--- succesive nodes at a time, only the current iteration child /could/ be
--- effectively dropped.
---
--- However, dropping the current iteration child node results in wave fronts
--- with holes: now for every right boundary node found, a diagonal is not
--- occupied. This requires the diagonal invariant to be changed to "diagonal
--- indices in succesive nodes of a wave front differ by 2, unless a node lies
--- on the right boundary, in which case its diagonal must differ from the previous
--- by a factor of 2". It was decided to not follow this path, because the gain
--- of not keeping this node was found to be negligible compared with the resulting
--- increase in specification complexity.
---------------------------------------------------------------------------------
-
--- A wave front is a list of 'DL' nodes, all at the same edit distance @D@,
--- with k-diagonals @D@, @D−2@, …, @-D+2@, @-D@.
--- Wave fronts establish a connection with the Myers algorithm:
--- @D@ corresponds to the algorithm's current iteration step and the resulting
--- 'ses' length. In Myers the diagonal arrangement is used to optimize space;
--- within 'dstep' it allows us to ensure 'furthestReaching' always compares
--- nodes on the same diagonals.
-{-@ type WaveFront M N D = {xs : [DLN M N D] | _wfDiags (_kdiag (head xs)) xs} @-}
-
 {-@ reflect furthestReaching @-}
 -- | Select the furthest-reaching candidate of two 'DL' nodes competing for the
 -- same k-diagonal, as required by the Myers algorithm.
@@ -224,120 +149,6 @@ furthestReaching :: DL -> DL -> DL
 furthestReaching x y
   | poi x >= poi y = x
   | otherwise      = y
-
--- * Proving the algorithm termination in Liquid Haskell
---
--- The original algorithm is known to terminate because a wave front /eventually/ reaches the 'endPoint'.
--- To prove this, both inputs lengths are threaded within phantom parameters throughout the implementation.
--- In essence, both lengths are used to encode the edit grid and its end point.
-
-{-@ reflect _manhattanDistance @-}
-_manhattanDistance :: Int -> Int -> DL -> Int
-_manhattanDistance lena lenb dl  = lena - (poi dl) + lenb - (poj dl)
-
-{-@ reflect _wfDistanceToGoal @-}
--- | The smallest manhattan distance from a wave front node to the goal @(lena, lenb)@.
--- The empty wave front yields @lena + lenb + 2@, a sentinel strictly greater
--- than any in-bounds node's distance, acting as the identity for the minimum.
-_wfDistanceToGoal :: Int -> Int -> [DL] -> Int
-_wfDistanceToGoal lena lenb [] = lena + lenb + 2
-_wfDistanceToGoal lena lenb (dl:dls) =
-  -- We avoid using 'min' here so that LH can unfold this definition.
-  if _manhattanDistance lena lenb dl < _wfDistanceToGoal lena lenb dls
-  then _manhattanDistance lena lenb dl
-  else _wfDistanceToGoal lena lenb dls
-
--- | A lemma that expresses a lower bound of the wavefront distance in terms
--- of the diagonal of the first node: @lena - lenb - k@
---
--- We assume all the nodes to be within the grid.
---
--- @lena - lenb@ is the diagonal of the goal. Informally, the
--- shortest way from a node must necessarily visit all the intermediate
--- diagonals. The minimum amount of diagonals to visit is given by the
--- difference between the diagonal indices of the goal and the first element.
---
--- We can prove it manually like so:
---
--- For every node @dl = DL i j p@ we can prove
--- @H(dl) = _manhattanDistance lena lenb dl >= lena - lenb - (i - j)@
---
--- @
---   _manhattanDistance lena lenb dl
--- =
---   lena - (poi dl) + lenb - (poj dl)
--- =
---   lena - i + lenb - j
--- =
---   lena - lenb - (i - j) + 2 * (lenb - j)
--- >=
---   lena - lenb - (i - j)
--- @
---
--- Since @H(dl)@ holds for every node in the wave front, it follows
--- that the wave front distance is at least as large as the smallest of
--- these bounds, which is @lena - lenb - k@ for the largest @k = i0 - j0@,
--- which is the diagonal of the first node.
---
--- QED
--- @
-{-@ _wfDistanceLowerBoundK
-      :: lena : Nat -> lenb : Nat -> {k : Int | lenb + k + 2 >= 0}
-      -> xs : {v : [{dl : DL | _withinBounds lena lenb dl}] | _wfDiags k v}
-      -> {_wfDistanceToGoal lena lenb xs >= lena - lenb - k}
-      / [len xs] @-}
-_wfDistanceLowerBoundK :: Int -> Int -> Int -> [DL] -> ()
-_wfDistanceLowerBoundK _    _    _ []      = ()
-_wfDistanceLowerBoundK lena lenb k (_:dls) = _wfDistanceLowerBoundK lena lenb (k - 2) dls
-
--- | If a wave front's node (@prev@) is on the bottom boundary, then the following
--- nodes lie farther from the goal. Intuitively, the reason is that the following
--- nodes children would need more steps to cross @prev@'s diagonal to reach the goal.
--- This lemma allows LH to reason about the case where nodes are discarded
--- after a bottom-boundary node within 'dstep'.
-{-@
-_wfDistanceLowerBound
-      :: lena : Nat -> lenb : Nat -> {prev : DL | _withinBounds lena lenb prev}
-      -> xs : {v : [{dl : DL | _withinBounds lena lenb dl}] | _wfDiags (_kdiag prev - 2) v}
-      -> { poj prev >= lenb =>  _wfDistanceToGoal lena lenb xs > _manhattanDistance lena lenb prev}
- @-}
-_wfDistanceLowerBound :: Int -> Int -> DL -> [DL] -> ()
-_wfDistanceLowerBound lena lenb prev [] = ()
-_wfDistanceLowerBound lena lenb prev xs@(_:_) = ()
-  where
-    _lemma = _wfDistanceLowerBoundK lena lenb (_kdiag prev - 2) xs
-
-
--- | The termination metric is non-negative: every in-bounds node has a
--- non-negative manhattan distance to the goal, and the empty wave front
--- yields the positive sentinel. Needed because the @Nat@ result refinement
--- of the reflected '_wfDistanceToGoal' is not instantiated at logic-level
--- applications, while termination metrics must be provably non-negative.
-{-@ _minDistanceNonNegative
-      :: lena : Nat -> lenb : Nat
-      -> xs : [{dl : DL | _withinBounds lena lenb dl}]
-      -> {_wfDistanceToGoal lena lenb xs >= 0}
-      / [len xs] @-}
-_minDistanceNonNegative :: Int -> Int -> [DL] -> ()
-_minDistanceNonNegative _    _    []       = ()
-_minDistanceNonNegative lena lenb (_:dls) = _minDistanceNonNegative lena lenb dls
-
-{-@ inline _reducesDistanceToGoal @-}
-_reducesDistanceToGoal :: Int -> Int -> [DL] -> [DL] -> Bool
-_reducesDistanceToGoal lena lenb wf1 wf2 = _wfDistanceToGoal lena lenb wf2 < _wfDistanceToGoal lena lenb wf1
-
-{-@ inline _withinBounds @-}
-{-@ _withinBounds :: lena : Nat -> lenb : Nat -> dl : DL -> {v:Bool | v <=> (poi dl <= lena && poj dl <= lenb) } @-}
-_withinBounds :: Int -> Int -> DL -> Bool
-_withinBounds lena lenb dl = poi dl <= lena && poj dl <= lenb
-
-{-@ inline endPoint @-}
-endPoint :: Int -> Int -> DL -> Bool
-endPoint lena lenb dl = poi dl == lena && poj dl == lenb
-
--- This refinement type alias allows LiquidHaskell to reason about the function
--- parameter of 'addsnake' that establishes whether coordinates are within bounds.
-{-@ type DiagPred M N = i : Nat -> j : Nat -> {b : Bool | ((i >= M || j >= N) => not b)} @-}
 
 -- | Build a /diagonal predicate/ — a closure that tests whether position
 -- @(i, j)@ in the edit graph has a diagonal edge (a /match point/ in Myers'
@@ -641,3 +452,212 @@ getGroupedDiffBy eq a b = groupDiff $ getDiffBy eq a b
     leadingBoths (Both w z : diffs) = let (as, bs, rest) = leadingBoths diffs
                                        in (w:as, z:bs, rest)
     leadingBoths diffs = ([], [], diffs)
+
+--------------------------------------------------------------------------------
+-- * LiquidHaskell Wave Front Specification
+--
+-- Wave fronts establish a connection between the orignal the Myers algorithm
+-- and this implementation:
+-- Their nodes carry the edit distance, which also corresponds to the
+-- algorithm's current iteration step and the resulting 'ses' length.
+-- In Myers the diagonal arrangement invariant of the iteration is used to
+-- optimize space; within 'dstep' it allows us to ensure 'furthestReaching'
+-- always compares nodes on the same diagonals.
+--------------------------------------------------------------------------------
+
+-- Field refinements are implemented with measures, which means they are
+-- available only when a 'DL' value is pattern matched;
+-- This invariant on DLs makes the coordinates non-negativity available
+-- for any value of type 'DL' regardless of whether it has been pattern matched.
+{-@ using (DL) as { dl : DL | poi dl >= 0 && poj dl >= 0 } @-}
+
+-- A "D-path location node" is a 'DL' value within the edit grid bounds
+-- having a fixed /D-length/.
+{-@ type DLN M N D = { x : DL | len (path x) = D && _withinBounds M N x} @-}
+
+{-@ reflect _kdiag @-}
+-- | Computes the k-diagonal of a node.
+-- Used in LiquidHaskell logic as an expression.
+_kdiag :: DL -> Int
+_kdiag dl = poi dl - poj dl
+
+{-@ reflect _wfDiags @-}
+{-@ _wfDiags :: Int -> xs : [DL] -> Bool / [len xs] @-}
+-- | Checks if succesive nodes of a wave front lie within k-diagonals
+-- differing by 2 as described in the Myers algorithm.
+-- Used in LiquidHaskell logic as a predicate.
+-- See [NOTE: diagonal-invariant]
+_wfDiags :: Int -> [DL] -> Bool
+_wfDiags _ [] = True
+_wfDiags k (dl:dls) = _kdiag dl == k && _wfDiags (k - 2) dls
+
+--------------------------------------------------------------------------------
+-- [NOTE: diagonal-invariant]
+--
+-- The '_wfDiags' predicate states that succesive nodes in a wave front lie
+-- on diagonals whose indices differ by two. This is leveraged by LiquidHaskell
+-- to check that the 'furthestReaching' precondition stating that the two nodes
+-- it compares lie on the same diagonal is satisfied within `dstep`.
+-- However, even though a more flexible predicate could be used to prove it,
+-- a compromise was made in preserving this invariant to keep the specification
+-- complexity low at a negligible performance penalty cost.
+-- This note documents this compromise.
+--
+-- To prove 'ses' terminates, wave fronts are restricted to be within the
+-- edit grid. This is done by placing checks for boundary nodes within 'dstep'
+-- to avoid constructing nodes outside the grid. 'dstep' leverages such checks
+-- in optimizations that rely on the observation that boundary nodes signal
+-- other nodes cannot compete to the goal:
+--
+--  * If a bottom boundary is found, all subsequent nodes are not considered.
+--
+--  * If a right boundary is found, all previously constructed child nodes
+--    can be dropped.
+--
+-- Both preserve the diagonal invariant, as the wave front would just become
+-- narrower. However, due to the asymmetry of list traversal, the first one is
+-- readily implemented, while the second requires an additional operation whose
+-- cost trumps the gain of not keeping them for next iterations (according to the
+-- existing benchmarks). Because of this, and 'stepAndMege' looking a two
+-- succesive nodes at a time, only the current iteration child /could/ be
+-- effectively dropped.
+--
+-- However, dropping the current iteration child node results in wave fronts
+-- with holes: now for every right boundary node found, a diagonal is not
+-- occupied. This requires the diagonal invariant to be changed to "diagonal
+-- indices in succesive nodes of a wave front differ by 2, unless a node lies
+-- on the right boundary, in which case its diagonal must differ from the previous
+-- by a factor of 2". It was decided to not follow this path, because the gain
+-- of not keeping this node was found to be negligible compared with the resulting
+-- increase in specification complexity.
+--------------------------------------------------------------------------------
+
+-- A wave front is a list of 'DL' nodes, all at the same edit distance @D@,
+-- with k-diagonals @D@, @D−2@, …, @-D+2@, @-D@.
+-- See [NOTE: diagonal-invariant]
+{-@ type WaveFront M N D = {xs : [DLN M N D] | _wfDiags (_kdiag (head xs)) xs} @-}
+
+--------------------------------------------------------------------------------
+-- * Proving the Algorithm's Termination in LiquidHaskell
+--
+-- The `ses` (_smallest edit script_) function termination is proved by defining
+-- a wave front's distance to the _endpoint_ as decreasing metric.
+-- This function is the implementation's entry point to the Myers diff algorithm,
+-- whose original specification waives the need for a termination proof by
+-- bounding the algorithm's outer loop by the known worst case edit script length,
+-- i.e. the sum of both input's lengths. These lengths are threaded through the
+-- implementation as phantom parameters for the following helpers to provide the
+-- LiquidHaskell specification a notion of the edit grid (as nodes '_withinBounds')
+-- and its end point.
+--------------------------------------------------------------------------------
+
+{-@ reflect _manhattanDistance @-}
+_manhattanDistance :: Int -> Int -> DL -> Int
+_manhattanDistance lena lenb dl  = lena - (poi dl) + lenb - (poj dl)
+
+{-@ reflect _wfDistanceToGoal @-}
+-- | The smallest manhattan distance from a wave front node to the goal @(lena, lenb)@.
+-- The empty wave front yields @lena + lenb + 2@, a sentinel strictly greater
+-- than any in-bounds node's distance, acting as the identity for the minimum.
+_wfDistanceToGoal :: Int -> Int -> [DL] -> Int
+_wfDistanceToGoal lena lenb [] = lena + lenb + 2
+_wfDistanceToGoal lena lenb (dl:dls) =
+  -- We avoid using 'min' here so that LH can unfold this definition.
+  if _manhattanDistance lena lenb dl < _wfDistanceToGoal lena lenb dls
+  then _manhattanDistance lena lenb dl
+  else _wfDistanceToGoal lena lenb dls
+
+{-@ inline _reducesDistanceToGoal @-}
+_reducesDistanceToGoal :: Int -> Int -> [DL] -> [DL] -> Bool
+_reducesDistanceToGoal lena lenb wf1 wf2 =
+  _wfDistanceToGoal lena lenb wf2 < _wfDistanceToGoal lena lenb wf1
+
+{-@ inline _withinBounds @-}
+{-@ _withinBounds :: lena : Nat -> lenb : Nat -> dl : DL
+                   -> {v:Bool | v <=> (poi dl <= lena && poj dl <= lenb) } @-}
+_withinBounds :: Int -> Int -> DL -> Bool
+_withinBounds lena lenb dl = poi dl <= lena && poj dl <= lenb
+
+{-@ inline endPoint @-}
+endPoint :: Int -> Int -> DL -> Bool
+endPoint lena lenb dl = poi dl == lena && poj dl == lenb
+
+-- This refinement type alias allows LiquidHaskell to reason about the function
+-- parameter of 'addsnake' that establishes whether coordinates are within bounds.
+{-@ type DiagPred M N = i : Nat -> j : Nat -> {b : Bool | b => i < M && j < N} @-}
+
+-- | A lemma that expresses a lower bound of the wavefront distance in terms
+-- of the diagonal of the first node: @lena - lenb - k@
+--
+-- We assume all the nodes to be within the grid.
+--
+-- @lena - lenb@ is the diagonal of the goal. Informally, the
+-- shortest way from a node must necessarily visit all the intermediate
+-- diagonals. The minimum amount of diagonals to visit is given by the
+-- difference between the diagonal indices of the goal and the first element.
+--
+-- We can prove it manually like so:
+--
+-- For every node @dl = DL i j p@ we can prove
+-- @H(dl) = _manhattanDistance lena lenb dl >= lena - lenb - (i - j)@
+--
+-- @
+--   _manhattanDistance lena lenb dl
+-- =
+--   lena - (poi dl) + lenb - (poj dl)
+-- =
+--   lena - i + lenb - j
+-- =
+--   lena - lenb - (i - j) + 2 * (lenb - j)
+-- >=
+--   lena - lenb - (i - j)
+-- @
+--
+-- Since @H(dl)@ holds for every node in the wave front, it follows
+-- that the wave front distance is at least as large as the smallest of
+-- these bounds, which is @lena - lenb - k@ for the largest @k = i0 - j0@,
+-- which is the diagonal of the first node.
+--
+-- QED
+-- @
+{-@ _wfDistanceLowerBoundK
+      :: lena : Nat -> lenb : Nat -> {k : Int | lenb + k + 2 >= 0}
+      -> xs : {v : [{dl : DL | _withinBounds lena lenb dl}] | _wfDiags k v}
+      -> {_wfDistanceToGoal lena lenb xs >= lena - lenb - k}
+      / [len xs] @-}
+_wfDistanceLowerBoundK :: Int -> Int -> Int -> [DL] -> ()
+_wfDistanceLowerBoundK _    _    _ []      = ()
+_wfDistanceLowerBoundK lena lenb k (_:dls) = _wfDistanceLowerBoundK lena lenb (k - 2) dls
+
+-- | If a wave front's node (@prev@) is on the bottom boundary, then the following
+-- nodes lie farther from the goal. Intuitively, the reason is that the following
+-- nodes children would need more steps to cross @prev@'s diagonal to reach the goal.
+-- This lemma allows LH to reason about the case where nodes are discarded
+-- after a bottom-boundary node within 'dstep'.
+{-@
+_wfDistanceLowerBound
+      :: lena : Nat -> lenb : Nat -> {prev : DL | _withinBounds lena lenb prev}
+      -> xs : {v : [{dl : DL | _withinBounds lena lenb dl}] | _wfDiags (_kdiag prev - 2) v}
+      -> { poj prev >= lenb =>  _wfDistanceToGoal lena lenb xs > _manhattanDistance lena lenb prev}
+ @-}
+_wfDistanceLowerBound :: Int -> Int -> DL -> [DL] -> ()
+_wfDistanceLowerBound lena lenb prev [] = ()
+_wfDistanceLowerBound lena lenb prev xs@(_:_) = ()
+  where
+    _lemma = _wfDistanceLowerBoundK lena lenb (_kdiag prev - 2) xs
+
+
+-- | The termination metric is non-negative: every in-bounds node has a
+-- non-negative manhattan distance to the goal, and the empty wave front
+-- yields the positive sentinel. This lemma is needed because the @Nat@ result
+-- refinement of the reflected '_wfDistanceToGoal' is not instantiated at
+-- logic-level  applications, while termination metrics must be provably
+-- non-negative.
+{-@ _minDistanceNonNegative
+      :: lena : Nat -> lenb : Nat
+      -> xs : [{dl : DL | _withinBounds lena lenb dl}]
+      -> {_wfDistanceToGoal lena lenb xs >= 0}
+      / [len xs] @-}
+_minDistanceNonNegative :: Int -> Int -> [DL] -> ()
+_minDistanceNonNegative _    _    []       = ()
+_minDistanceNonNegative lena lenb (_:dls) = _minDistanceNonNegative lena lenb dls

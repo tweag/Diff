@@ -126,7 +126,7 @@ recoverSecond [] = []
 -- | Indicates whether a list is a longest common subsequence of two
 -- lists.
 isLCS :: (Eq a) => [a] -> [a] -> [a] -> Bool
-isLCS ss xs ys = isSub ss ys && isSub ss ys && length ss == lenLCS xs ys
+isLCS ss xs ys = isSub ss xs && isSub ss ys && length ss == lenLCS xs ys
 
 -- | Computes the length of the longest common subsequence of two
 -- lists. This is a naive and inefficient recursive implementation

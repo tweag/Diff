@@ -11,6 +11,7 @@ import Data.Algorithm.DiffContext
 import Data.Algorithm.DiffOutput
 import qualified Data.Array as A
 import Data.Foldable
+import Data.List (isSubsequenceOf, subsequences)
 import Data.Semigroup (Arg(..))
 import Text.PrettyPrint
 
@@ -25,14 +26,7 @@ import System.Directory (getTemporaryDirectory)
 
 
 main :: IO ()
-main = defaultMain [ testGroup "sub props" [
-                        slTest "empty in subs" prop_emptyInSubs,
-                        slTest "self in subs"  prop_selfInSubs,
-                        slTest "count subs"    prop_countSubs,
-                        slTest "every sub is a sub" prop_everySubIsSub,
-                        slTest2 "sub prop" prop_sub
-                     ],
-                     testGroup "diff props" [
+main = defaultMain [ testGroup "diff props" [
                         slTest "lcsEmpty" prop_lcsEmpty,
                         slTest "lcsSelf" prop_lcsSelf,
                         slTest2 "lcsBoth" prop_lcsBoth,
@@ -76,29 +70,6 @@ main = defaultMain [ testGroup "sub props" [
 slTest s t = testProperty s $ forAll shortLists   (t :: [Bool] -> Bool)
 slTest2 s t = testProperty s $ forAll2 shortLists (t :: [Bool] -> [Bool] -> Bool)
 
--- We need some quick and dirty subsequence stuff for the diff tests,
--- so we build that and some tests for it.
-
--- | Determines whether one list is a subsequence of another.
-isSub :: (Eq a) => [a] -> [a] -> Bool
-isSub [] _ = True
-isSub (_:_) [] = False
-isSub (x:xs) (y:ys) | x == y = isSub xs ys
-                    | otherwise = isSub (x:xs) ys
-
--- | Lists the subsequences of a list.
-subs :: [a] -> [[a]]
-subs [] = [[]]
-subs (x:rest) = map (x:) restss ++ restss
-  where restss = subs rest
-
-prop_emptyInSubs = elem [] . subs
-prop_selfInSubs xs = elem xs (subs xs)
-prop_countSubs xs = length (subs xs) == 2^(length xs)
-prop_sub xs ys = isSub xs ys == elem xs (subs ys)
-prop_everySubIsSub xs = all (flip isSub xs) (subs xs)
-
-
 -- | Obtains a longest common subsequence of two lists using their diff.
 diffLCS :: (Eq a) => [a] -> [a] -> [a]
 diffLCS xs ys = recoverLCS $ getDiff xs ys
@@ -126,7 +97,12 @@ recoverSecond [] = []
 -- | Indicates whether a list is a longest common subsequence of two
 -- lists.
 isLCS :: (Eq a) => [a] -> [a] -> [a] -> Bool
-isLCS ss xs ys = isSub ss xs && isSub ss ys && length ss == lenLCS xs ys
+isLCS ss xs ys =
+  and
+    [ ss `isSubsequenceOf` xs,
+      ss `isSubsequenceOf` ys,
+      length ss == lenLCS xs ys
+    ]
 
 -- | Computes the length of the longest common subsequence of two
 -- lists. This is a naive and inefficient recursive implementation

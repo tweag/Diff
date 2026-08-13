@@ -1,4 +1,4 @@
-Cabal-Version:       1.18
+Cabal-Version:       3.14
 name:                Diff
 version:             1.0.2
 synopsis:            Diff algorithm in pure Haskell
@@ -8,12 +8,14 @@ description:         Implementation of the standard diff algorithm in Haskell.
  Space complexity is O(D^2).  Includes utilities for pretty printing.
 category:            Algorithms
 homepage:            https://citeseerx.ist.psu.edu/viewdoc/summary?doi=10.1.1.4.6927
-license:             BSD3
+license:             BSD-3-Clause
 license-file:        LICENSE
 author:              Sterling Clover
 maintainer:          David Fox <dsf@seereason.com>
-Build-Type:          Simple
-extra-doc-files:     README.md
+build-Type:          Simple
+extra-doc-files:     README.md, CHANGELOG.md
+extra-files:         ./Diff-liquidhaskell/Diff-liquidhaskell.cabal
+bug-reports:         https://github.com/seereason/Diff/issues
 
 tested-with:
   GHC == 9.14.1
@@ -28,8 +30,6 @@ tested-with:
   GHC == 8.8.4
   GHC == 8.6.5
   GHC == 8.4.4
-
-extra-doc-files:     CHANGELOG.md
 
 library
   default-language: Haskell2010

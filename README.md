@@ -24,11 +24,11 @@ Benchmark with
 cabal bench
 ```
 
-### Checking Diff with Liquid Haskell
+### Checking Diff with LiquidHaskell
 
-The Diff source code can we checked with [Liquid Haskell](https://ucsd-progsys.github.io/liquidhaskell/).
+The Diff source code can we checked with [LiquidHaskell](https://ucsd-progsys.github.io/liquidhaskell/).
 
-Liquid Haskell requires `ghc` version 9.14.1, and an SMT solver. We have tested
+LiquidHaskell requires `ghc` version 9.14.1, and an SMT solver. We have tested
 the checks with the [Z3](https://github.com/Z3Prover/z3) SMT solver (versions 4.16,
 and 4.15.1).
 
@@ -44,4 +44,10 @@ flowchart LR
     Diff --> liquidhaskell --> liquidhaskell-boot --> Diff
 ```
 
-Contributions that update the Liquid Haskell checks are appreciated but not required at this point.
+Contributions that update the LiquidHaskell checks are appreciated but not required at this point.
+
+### Acknowledgments
+
+The LiquidHaskell static checks were designed and implemented with the support of
+[Tweag](https://www.tweag.io/), a part of [Modus Create](https://www.moduscreate.com/).
+Learn more in this [blog post](https://www.tweag.io/blog/2026-06-11-diff-package-static-checks/).

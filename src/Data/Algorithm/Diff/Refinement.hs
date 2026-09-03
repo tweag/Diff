@@ -1,5 +1,5 @@
 -- | Refinement type aliases for 'PolyDiff', related predicates and (lifted) utility functions.
--- The contents of this module are intended for use in Liquid Haskell specifications;
+-- The contents of this module are intended for use in LiquidHaskell specifications;
 -- importing this module can result in unused import warnings in GHC,
 -- which can be suppressed with @-Wno-unused-imports@.
 module Data.Algorithm.Diff.Refinement where
